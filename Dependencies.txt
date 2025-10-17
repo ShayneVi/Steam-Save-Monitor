@@ -1,0 +1,74 @@
+# Steam Backup Manager - System Requirements
+
+## Required Software
+
+Your friend will need to install these **before** using the app:
+
+### 1. **Ludusavi**
+   - **What it is:** Game save backup tool that the app integrates with
+   - **Download:** https://github.com/mtkennerly/ludusavi/releases
+   - **Installation:** Download the latest release (Windows .exe version) and extract it to a folder
+   - **Action:** The app will ask to locate this executable when first setting up
+
+### 2. **Windows PowerShell** (usually pre-installed)
+   - **What it is:** Used for displaying Windows notifications
+   - **Check if installed:** Should already be on Windows 10/11
+   - **If missing:** Download from Microsoft Store or Windows Update
+
+## Optional But Recommended
+
+### 3. **Steam Account**
+   - Your friend needs a Steam account (free or paid games don't matter)
+   - They'll need their Steam API Key from: https://steamcommunity.com/dev/apikey
+   - They'll need their Steam64 ID from their profile URL
+
+## Configuration Steps
+
+Your friend needs to gather these before opening the app:
+
+1. **Steam API Key**
+   - Go to: https://steamcommunity.com/dev/apikey
+   - Log in and request an API key (it's free)
+   - Copy the key they receive
+
+2. **Steam Profile ID (Steam64)**
+   - Go to: https://steamcommunity.com/
+   - Click their profile
+   - Look at the URL: `https://steamcommunity.com/profiles/[STEAM64ID]`
+   - Copy just the numbers (e.g., `76561198012345678`)
+
+3. **Ludusavi Path**
+   - Know where they extracted Ludusavi (e.g., `C:\Programs\Ludusavi\ludusavi.exe`)
+
+4. **Backup Folder**
+   - Choose or create a folder where backups will be stored (e.g., `C:\GameBackups\`)
+
+## The Actual App
+
+The Steam Backup Manager app itself (.msi installer) requires:
+- **Windows 10 or later**
+- **Internet connection** (for Steam API calls)
+- **No other dependencies** - everything else is bundled
+
+## Installation Instructions for Your Friend
+
+1. Download the `.msi` file you send them
+2. Double-click to run the installer
+3. Follow the installation wizard
+4. Launch the app
+5. Go to Settings tab and configure:
+   - Steam API Key
+   - Steam Profile ID
+   - Ludusavi executable path
+   - Backup folder location
+6. Click "Save Configuration"
+7. Go to Game Executables tab and set up games they want to monitor
+8. Done!
+
+## Troubleshooting
+
+If something doesn't work:
+- **"Ludusavi not found"** → They need to install Ludusavi first
+- **"Steam API error"** → Check the API key is correct
+- **"No games loading"** → May take a minute on first load (it caches after)
+- **Notifications not showing** → PowerShell needs to be enabled
