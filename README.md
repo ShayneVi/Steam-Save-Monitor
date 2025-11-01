@@ -1,8 +1,8 @@
-# Steam Save Monitor
+# Steam Backup Manager
 
 <div align="center">
 
-**Automatic game save backup solution with intelligent Steam and process monitoring**
+**Comprehensive game save backup and achievement tracking solution with intelligent monitoring**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://www.microsoft.com/windows)
@@ -14,35 +14,45 @@
 
 ## 📋 Overview
 
-Steam Save Monitor is a desktop application that automatically monitors your gaming sessions and creates backups of your game saves using [Ludusavi](https://github.com/mtkennerly/ludusavi). It intelligently detects when games are launched and closed, then automatically backs up your progress without any manual intervention.
+Steam Backup Manager is a powerful desktop application that combines automatic game save backups with comprehensive achievement tracking. It monitors your gaming sessions, tracks achievement unlocks across multiple sources, and creates intelligent backups of both your saves and achievements—all without manual intervention.
 
-### Key Features
+### Core Features
 
-- **🎮 Dual Monitoring System**
-  - Steam API integration for automatic game detection
-  - Process-based monitoring for custom game executables
-  - Intelligent coordination between both systems
+- **🏆 Multi-Source Achievement Tracking**
+  - Steam API integration for official achievements
+  - Goldberg Emulator support
+  - Online-fix achievements detection
+  - Steamtools compatibility
+  - GSE Saves integration
+  - Automatic source detection and scanning
+  - Manual achievement management
 
-- **💾 Automatic Backups**
-  - Backs up game saves immediately after closing a game
-  - Uses Ludusavi's comprehensive game database
-  - Configurable backup directory
+- **💾 Intelligent Backup System**
+  - Automatic game save backups using Ludusavi
+  - Achievement backup and restore functionality
+  - Export achievements in Steam API format
+  - Backup versioning with timestamps
+  - Configurable backup locations
 
-- **🔔 Smart Notifications**
-  - Windows native notifications for backup status
-  - System sound alerts for important events
-  - Real-time feedback on backup operations
+- **🎮 Real-Time Game Monitoring**
+  - Steam API integration for game detection
+  - Process-based monitoring for non-Steam games
+  - Achievement unlock detection during gameplay
+  - Automatic backup on game closure
 
-- **⚡ Performance Optimized**
-  - Cached manifest for instant game lookup
-  - Minimal system resource usage
-  - Runs efficiently in the background
+- **🔔 Advanced Notification System**
+  - Rarity-based achievement notifications
+  - In-game overlay with customizable appearance
+  - Windows native notifications
+  - Achievement unlock animations
+  - Customizable notification sounds
 
-- **🎯 User-Friendly Interface**
-  - Clean, modern UI with dark theme
-  - Easy configuration wizard
-  - Searchable game database
-  - System tray integration
+- **⚙️ Extensive Customization**
+  - Five rarity tiers (Common, Uncommon, Rare, Ultra Rare, Legendary)
+  - Per-rarity notification customization
+  - Custom colors, fonts, icons, and sounds
+  - Adjustable notification position and scaling
+  - Glow effects and transparency settings
 
 ---
 
@@ -50,118 +60,244 @@ Steam Save Monitor is a desktop application that automatically monitors your gam
 
 ### Prerequisites
 
-Before installing Steam Save Monitor, ensure you have:
-
 1. **Windows 10 or later**
 2. **[Ludusavi](https://github.com/mtkennerly/ludusavi/releases)** - Download and extract the latest release
-3. **Steam Account** (optional, for Steam API monitoring)
+3. **Steam Account** (recommended for full functionality)
    - [Steam Web API Key](https://steamcommunity.com/dev/apikey)
-   - Your Steam64 ID (found in your profile URL)
+   - Steam64 ID (found in your profile URL)
 
 ### Installation
 
-1. Download the latest `.msi` installer from the [Releases](../../releases) page
+1. Download the latest `.msi` installer from the Releases page
 2. Run the installer and follow the setup wizard
-3. Launch Steam Save Monitor from the Start Menu or Desktop shortcut
+3. Launch Steam Backup Manager from the Start Menu or Desktop shortcut
 
 ### Initial Configuration
 
-1. Open the application and navigate to the **Settings** tab
-2. Configure the following fields:
+Navigate to the **Settings** tab and configure:
 
-   | Field | Description | Example |
-   |-------|-------------|---------|
-   | **Steam Web API Key** | Your personal API key from Steam | `ABC123XYZ789...` |
-   | **Steam User ID** | Your Steam64 ID | `76561198012345678` |
-   | **Ludusavi Executable Path** | Path to ludusavi.exe | `C:\Tools\Ludusavi\ludusavi.exe` |
-   | **Backup Directory** | Where backups will be stored | `C:\GameBackups` |
+| Field | Description | Example |
+|-------|-------------|---------|
+| **Steam Web API Key** | Personal API key from Steam | `ABC123XYZ789...` |
+| **Steam User ID** | Steam account ID | `your_username` |
+| **Steam64 ID** | 64-bit Steam ID | `76561198012345678` |
+| **Ludusavi Path** | Path to ludusavi.exe | `C:\Tools\Ludusavi\ludusavi.exe` |
+| **Backup Directory** | Backup storage location | `C:\GameBackups` |
 
-3. Click **Test** next to the Ludusavi path to verify it's working
-4. Click **Save Configuration**
-5. Navigate to the **Game Executables** tab to configure process monitoring (optional)
+Click **Save Configuration** to persist your settings.
 
 ---
 
-## 📖 How It Works
+## 📖 Achievement Tracking
 
-### Steam API Monitoring
+### Supported Sources
 
-When enabled, the app polls the Steam API every 5 seconds to detect:
-- Which game you're currently playing
-- When you start playing a game
-- When you stop playing a game
+The application automatically detects and tracks achievements from:
 
-When a game session ends, it automatically triggers a backup.
+1. **Steam** - Official Steam achievements via Web API
+2. **Goldberg Emulator** - Unlocked achievements from Goldberg
+3. **Online-fix** - Achievements from Online-fix releases
+4. **Steamtools** - Steamtools achievement data
+5. **GSE Saves** - Achievements from GSE save files
 
-### Process Monitoring
+### Adding Games
 
-For games not launched through Steam (or for additional precision):
-1. Navigate to the **Game Executables** tab
-2. Search for your game in the Ludusavi manifest
-3. Click **Select EXE** and browse to the game's executable
-4. The app will now monitor that specific process
+1. Navigate to the **Achievements** tab
+2. Search for your game using the Steam search
+3. Click **Add** on the desired game
+4. The app automatically checks which sources have achievement data
+5. Select your preferred source
+6. If a backup exists, you'll be prompted to restore it
 
-**Smart Coordination:** When a process-monitored game is running, Steam monitoring is automatically paused to prevent duplicate backups.
+### Achievement Management
 
-### Backup Process
+**Viewing Achievements:**
+- Click any game card to view its achievements
+- See unlock status, timestamps, and descriptions
+- View global unlock percentages
+- Filter achievements by status
 
-1. Game closure is detected
-2. Brief delay to ensure all save files are written
-3. Ludusavi is called to backup the game's saves
-4. Results are displayed via notification
-5. Backup is stored in your configured directory
+**Manual Editing:**
+- Click any achievement to open the editor
+- Toggle unlock status
+- Set custom unlock time
+- Changes sync immediately
 
----
+**Exporting Achievements:**
+- Open a game's achievement list
+- Click the **Export** button
+- Achievements are saved in Steam API format to:
+  `Documents/Steam Backup Monitor/{Game_Name}.json`
+- Exports include all unlocked achievements with timestamps
 
-## 🎯 Usage Guide
+**Restoring from Backup:**
+- When adding a game with an existing backup
+- Confirm the restore prompt
+- All backed-up achievements are restored with original timestamps
+- The app continues monitoring the selected source for new unlocks
 
-### Managing Game Executables
+### Real-Time Detection
 
-The **Game Executables** tab allows you to configure process-based monitoring:
-
-- **Search:** Use the search bar to filter through Ludusavi's game database
-- **Add Game:** Click "Select EXE" next to a game name and browse to its executable
-- **Remove Game:** Click the trash icon next to configured games
-- **Refresh Manifest:** Update the game database (cached for 24 hours)
-
-### Notification System
-
-Notifications inform you of:
-- ✅ **Backup Success** - Shows number of files backed up and total size
-- ▶️ **Game Detected** - When a game starts
-- ⏹️ **Game Ended** - When a game closes
-- ⚠️ **Errors** - Any issues during backup
-- 🔍 **Game Not Found** - When a game isn't in Ludusavi's database
-
-### System Tray
-
-The app minimizes to the system tray:
-- **Left Click** - Open the settings window
-- **Right Click** - Access tray menu
-  - Open Settings
-  - Quit
+When you unlock achievements during gameplay:
+- Achievements are detected automatically
+- Notifications appear via the overlay system
+- Database is updated in real-time
+- Unlock times are recorded accurately
 
 ---
 
-## ⚙️ Configuration Options
+## 🎨 Notification Customization
 
-### Auto Start
-Launch Steam Save Monitor automatically when Windows starts.
+### Rarity System
 
-### Notifications
-Enable or disable Windows notifications for backup events.
+Achievements are categorized by global unlock percentage:
 
-### Backup Path
-Ludusavi stores backups in a date-organized structure:
+| Rarity | Unlock Rate | Default Color |
+|--------|-------------|---------------|
+| **Common** | 90%+ | Gray |
+| **Uncommon** | 60-89% | Green |
+| **Rare** | 35-59% | Blue |
+| **Ultra Rare** | 15-34% | Purple |
+| **Legendary** | 0-14% | Gold |
+
+### Per-Rarity Customization
+
+Navigate to **Achievement Customization** to configure each rarity tier:
+
+**Visual Settings:**
+- Border and background colors
+- Background opacity (0-100%)
+- Title and description text colors
+- Glow effects with custom colors
+- Notification position (5 presets)
+- Scaling (40% - 160%)
+
+**Content Customization:**
+- Custom icons (emoji or image files: PNG, JPG, GIF, WEBP, ICO, BMP, SVG)
+- Animated GIF support
+- Custom fonts (TTF, OTF, WOFF, WOFF2)
+- Custom sounds (MP3, WAV, OGG, FLAC, AAC)
+
+**Notification Behavior:**
+- Rarities disabled: Windows notification sound plays
+- Rarities enabled: Only custom sounds play (if configured)
+- No custom sound: Silent notifications
+- Individual test buttons per rarity
+
+### Overlay System
+
+Notifications appear as an overlay during gameplay:
+- Transparent window over games
+- Customizable position and scaling
+- Rarity-specific styling
+- Progress bar and unlock percentage display
+- Automatic fade-in/fade-out animations
+
+---
+
+## 💾 Backup Management
+
+### Automatic Backups
+
+**Game Saves:**
+- Triggered automatically when a game closes
+- Uses Ludusavi's comprehensive game database
+- Stores in configured backup directory
+- Includes file count and size information
+
+**Achievements:**
+- Manual export via Achievement tab
+- Stored in Documents/Steam Backup Monitor
+- Steam API compatible JSON format
+- Includes unlock timestamps
+
+### Backup Structure
+
 ```
 BackupPath/
 ├── GameName1/
 │   └── 2025-10-17T10-30-45/
 │       └── save files...
-└── GameName2/
-    └── 2025-10-17T14-22-10/
-        └── save files...
+└── Documents/Steam Backup Monitor/
+    ├── GameName1.json
+    └── GameName2.json
 ```
+
+### Restore Process
+
+1. Add a game to tracking
+2. Select achievement source
+3. If backup detected, confirm restore
+4. Achievements import with original timestamps
+5. App monitors for new achievements
+
+---
+
+## 🎯 Advanced Features
+
+### Game Monitoring
+
+**Steam API Monitoring:**
+- Polls Steam API every 5 seconds
+- Detects game launches and closures
+- Automatic backup on session end
+- Achievement sync with Steam
+
+**Process Monitoring:**
+- Monitor specific game executables
+- Support for non-Steam games
+- Prevents duplicate backups
+- Configurable per-game
+
+### Achievement Sources Detection
+
+When adding a game:
+1. App scans all configured achievement sources
+2. Displays available sources with achievement counts
+3. Select preferred source
+4. Scan completes with notification
+5. Achievements appear in database
+
+### Global Unlock Percentages
+
+- Fetched from Steam Web API
+- Updated when scanning achievements
+- Used for rarity calculation
+- Displayed in achievement lists
+- Powers notification customization
+
+---
+
+## ⚙️ Configuration
+
+### Settings Tab
+
+**Steam Integration:**
+- API key for game detection
+- User credentials for API access
+- 64-bit Steam ID for user identification
+
+**Backup Configuration:**
+- Ludusavi executable path
+- Backup storage directory
+- Test connection functionality
+
+**Application Settings:**
+- Auto-start with Windows
+- Notification preferences
+- Tray icon behavior
+
+### Achievement Customization Tab
+
+**Global Settings:**
+- Enable/disable rarity system
+- Default notification duration
+- Test notification button
+
+**Per-Rarity Configuration:**
+- All visual and audio settings
+- Individual test buttons
+- Real-time preview
 
 ---
 
@@ -169,55 +305,75 @@ BackupPath/
 
 ### Technology Stack
 
-- **Frontend:** React + TypeScript + Tailwind CSS
-- **Backend:** Rust + Tauri
-- **APIs:** Steam Web API, Windows Notifications
-- **External Tools:** Ludusavi
+**Frontend:**
+- React 18 with TypeScript
+- Tailwind CSS for styling
+- Vite for build tooling
+
+**Backend:**
+- Rust for performance and safety
+- Tauri for desktop integration
+- SQLite for achievement storage
+- Windows API for notifications
+
+**External Integrations:**
+- Steam Web API
+- Ludusavi for backup operations
+- Multiple achievement source parsers
 
 ### Building from Source
 
 #### Prerequisites
-- [Node.js](https://nodejs.org/) (v16 or later)
-- [Rust](https://www.rust-lang.org/tools/install)
-- [Tauri Prerequisites](https://tauri.app/v1/guides/getting-started/prerequisites)
+- Node.js v16 or later
+- Rust (latest stable)
+- Tauri prerequisites for Windows
 
 #### Build Steps
 
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/yourusername/steam-backup-manager.git
 cd steam-backup-manager
 
 # Install dependencies
 npm install
 
-# Run in development mode
+# Development mode
 npm run tauri:dev
 
-# Build for production
+# Production build
 npm run tauri:build
 ```
 
-The production build will be available in `src-tauri/target/release/bundle/`.
+The installer will be in `src-tauri/target/release/bundle/msi/`.
 
 ### Project Structure
 
 ```
 steam-backup-manager/
-├── src/                    # React frontend
-│   ├── App.tsx            # Main application component
-│   ├── main.tsx           # Entry point
-│   └── index.css          # Global styles
-├── src-tauri/             # Rust backend
+├── src/                          # React frontend
+│   ├── App.tsx                  # Main application
+│   ├── components/
+│   │   ├── Overlay.tsx          # In-game overlay
+│   │   ├── AchievementToast.tsx # Toast notifications
+│   │   └── RarityCustomizer.tsx # Rarity settings UI
+│   └── types/
+│       └── rarityTypes.ts       # Type definitions
+├── src-tauri/                    # Rust backend
 │   └── src/
-│       ├── main.rs        # Tauri application entry
-│       ├── config.rs      # Configuration management
-│       ├── steam_monitor.rs    # Steam API integration
-│       ├── process_monitor.rs  # Process detection
-│       ├── ludusavi.rs    # Ludusavi integration
-│       └── notifications.rs    # Windows notifications
-├── package.json
-└── tauri.conf.json
+│       ├── main.rs              # Application entry
+│       ├── achievements.rs      # Database operations
+│       ├── achievement_scanner.rs # Multi-source scanning
+│       ├── achievement_watcher.rs # Real-time detection
+│       ├── steam_achievements.rs # Steam API client
+│       ├── steam_monitor.rs     # Game detection
+│       ├── ludusavi.rs          # Backup integration
+│       ├── notifications.rs     # Notification system
+│       ├── overlay.rs           # Overlay management
+│       └── config.rs            # Configuration handling
+├── public/
+│   └── overlay.html             # Overlay window
+└── package.json
 ```
 
 ---
@@ -226,50 +382,62 @@ steam-backup-manager/
 
 ### Common Issues
 
-**"Ludusavi not found"**
-- Ensure Ludusavi is installed and the path is correct
-- Click "Browse" and navigate to `ludusavi.exe`
-- Click "Test" to verify the connection
+**"No achievements found"**
+- Verify the game has achievements on Steam
+- Check if your selected source has achievement data
+- Ensure Steam API credentials are correct
+- Try a different achievement source
 
-**"Steam API error"**
-- Verify your API key at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)
-- Check your Steam64 ID is correct
-- Ensure you're logged into Steam
+**"Backup restore failed"**
+- Verify backup file exists in Documents/Steam Backup Monitor
+- Check JSON file format is valid
+- Ensure game was added and scanned first
+- Try manually editing the backup file
 
-**Notifications not showing**
-- Check Windows notification settings
-- Ensure notifications are enabled in the app settings
-- Verify Windows PowerShell is installed
+**"Notifications not showing"**
+- Check Windows notification permissions
+- Verify overlay window permissions
+- Enable rarities in Achievement Customization
+- Check custom sound file paths
 
-**Game not detected**
-- For Steam games: Ensure Steam API is configured correctly
-- For other games: Add the executable in the Game Executables tab
-- Check if the game name exists in Ludusavi's manifest
+**"Achievement unlock not detected"**
+- Ensure game is being monitored
+- Verify achievement source is correct
+- Check if source files are accessible
+- Restart the application
 
-**Backup failed**
-- Verify Ludusavi path is correct
-- Ensure backup directory has write permissions
-- Check if the game is supported by Ludusavi
+**"Export failed"**
+- Check Documents folder permissions
+- Verify Steam Backup Monitor folder exists
+- Ensure game name doesn't contain invalid characters
+- Check disk space availability
 
-### Getting Help
+### Debug Mode
 
-For additional support:
-1. Check the [Ludusavi documentation](https://github.com/mtkennerly/ludusavi)
-2. Open an issue on GitHub with:
-   - Your configuration (redact sensitive info)
-   - Error messages
-   - Steps to reproduce
+For troubleshooting:
+1. Run from terminal: `npm run tauri:dev`
+2. Check console output for errors
+3. Overlay logs appear in terminal
+4. Achievement scan results are logged
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Areas for improvement:
+
+- Additional achievement source support
+- More notification customization options
+- Cloud backup integration
+- Achievement statistics and analytics
+- Multi-language support
+
+### Contribution Process
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
+2. Create feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
 ---
@@ -282,22 +450,27 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [Ludusavi](https://github.com/mtkennerly/ludusavi) - The excellent save backup tool that powers this application
-- [Tauri](https://tauri.app/) - For the modern desktop application framework
-- [Steam Web API](https://steamcommunity.com/dev) - For game detection capabilities
+- **[Ludusavi](https://github.com/mtkennerly/ludusavi)** - Excellent save backup tool that powers this application
+- **[Tauri](https://tauri.app/)** - Modern desktop application framework
+- **[Steam Web API](https://steamcommunity.com/dev)** - Game and achievement data
+- **Achievement Unlocker Community** - Inspiration and source format documentation
 
 ---
 
-## 📞 Contact
+## 📞 Support
 
-For questions, suggestions, or issues, please open an issue on GitHub.
+For questions, bug reports, or feature requests:
+- Open an issue on GitHub
+- Include configuration details (redact sensitive info)
+- Provide error messages and steps to reproduce
+- Attach relevant screenshots if applicable
 
 ---
 
 <div align="center">
 
-**Made with ❤️ for gamers who value their progress**
+**Made with ❤️ for gamers who value their progress and achievements**
 
-[Report Bug](../../issues) · [Request Feature](../../issues) · [Documentation](../../wiki)
+[Report Bug](../../issues) · [Request Feature](../../issues)
 
 </div>
