@@ -3,12 +3,22 @@ use windows::core::PCSTR;
 use std::ffi::CString;
 use std::thread;
 use notify_rust::Notification;
+use crate::overlay::OverlayManager;
+use std::sync::{Arc, Mutex};
 
-pub struct NotificationManager;
+pub struct NotificationManager {
+    overlay_manager: Option<Arc<Mutex<OverlayManager>>>,
+}
 
 impl NotificationManager {
     pub fn new() -> Self {
-        Self
+        Self {
+            overlay_manager: None,
+        }
+    }
+
+    pub fn set_overlay_manager(&mut self, overlay_manager: Arc<Mutex<OverlayManager>>) {
+        self.overlay_manager = Some(overlay_manager);
     }
 
     fn play_notification_sound() {
@@ -46,7 +56,7 @@ impl NotificationManager {
     }
 
     pub fn show_game_detected(&self, game_name: &str) {
-        self.show_notification("Game Save Monitor", &format!("{}\n▶ Game Detected - Monitoring saves...", game_name));
+        self.show_notification("Game Save Monitor", &format!("{}\n▶ Game Detected - Monitoring saves & achievements...", game_name));
     }
 
     pub fn show_game_ended(&self, game_name: &str) {
@@ -75,5 +85,30 @@ impl NotificationManager {
     pub fn show_error(&self, title: &str, message: &str) {
         let body = format!("⚠ {}", message);
         self.show_notification("Game Save Monitor", &format!("{}\n{}", title, body));
+    }
+
+    pub fn show_achievement_unlock(&self, game_name: &str, achievement_name: &str, description: &str, icon_url: Option<&str>, global_unlock_percentage: Option<f32>) {
+        // Try to use overlay if available
+        if let Some(overlay_manager) = &self.overlay_manager {
+            if let Ok(overlay) = overlay_manager.lock() {
+                let notification_data = serde_json::json!({
+                    "game_name": game_name,
+                    "achievement_name": achievement_name,
+                    "achievement_description": description,
+                    "icon_url": icon_url,
+                    "global_unlock_percentage": global_unlock_percentage
+                });
+
+                // Try to show on overlay
+                if overlay.show_overlay("achievement", notification_data).is_ok() {
+                    // Don't play sound here - overlay will handle it based on rarity settings
+                    return; // Success! Don't fall back to native
+                }
+            }
+        }
+
+        // Fallback to Windows native notification
+        let body = format!("🏆 {}\n{}", achievement_name, description);
+        self.show_notification(game_name, &body);
     }
 }

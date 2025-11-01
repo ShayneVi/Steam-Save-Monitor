@@ -6,25 +6,30 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
-    pub steam_api_key: String,
-    pub steam_user_id: String,
     pub ludusavi_path: String,
     pub backup_path: String,
     pub auto_start: bool,
     pub notifications_enabled: bool,
     pub game_executables: HashMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_id_64: Option<String>,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            steam_api_key: String::new(),
-            steam_user_id: String::new(),
             ludusavi_path: String::new(),
             backup_path: String::new(),
             auto_start: true,
             notifications_enabled: true,
             game_executables: HashMap::new(),
+            steam_api_key: None,
+            steam_user_id: None,
+            steam_id_64: None,
         }
     }
 }

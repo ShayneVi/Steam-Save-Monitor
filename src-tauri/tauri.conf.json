@@ -43,6 +43,8 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
+      "resources": ["steam_api64.dll"],
+      "externalBin": [],
       "targets": "all",
       "windows": {
         "certificateThumbprint": null,
@@ -51,7 +53,7 @@
       }
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' https://cdn.fastly.steamstatic.com https://cdn.cloudflare.steamstatic.com https://steamcdn-a.akamaihd.net data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'"
     },
     "systemTray": {
       "iconPath": "icons/tray-icon.png",
@@ -66,7 +68,25 @@
         "fullscreen": false,
         "decorations": true,
         "center": true,
-        "visible": false
+        "visible": true
+      },
+      {
+        "label": "overlay",
+        "title": "Overlay",
+        "url": "overlay.html",
+        "width": 1920,
+        "height": 1080,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "center": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "x": 0,
+        "y": 0
       }
     ]
   }
