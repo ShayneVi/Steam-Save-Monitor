@@ -1,0 +1,241 @@
+.achievement-toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 99999;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 400px;
+}
+
+.achievement-toast {
+  position: relative;
+  /* Background and border colors are set via inline styles */
+  border-width: 2px;
+  border-style: solid;
+  border-radius: 12px;
+  padding: 20px;
+  /* Box shadow is set via inline styles */
+  min-width: 350px;
+  max-width: 400px;
+  opacity: 0;
+  transform: translateX(450px);
+  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  overflow: hidden;
+  pointer-events: all;
+}
+
+.achievement-toast.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.achievement-toast-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  animation: pulse-glow 2s ease-in-out infinite;
+  opacity: 0.15;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.achievement-toast-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  /* Color is set via inline styles */
+  font-weight: bold;
+  font-size: 14px;
+  letter-spacing: 1.5px;
+}
+
+.achievement-toast-trophy {
+  /* Color is set via inline styles */
+  animation: trophy-bounce 0.6s ease-in-out;
+}
+
+@keyframes trophy-bounce {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-8px) rotate(-5deg);
+  }
+  50% {
+    transform: translateY(0) rotate(0deg);
+  }
+  75% {
+    transform: translateY(-4px) rotate(5deg);
+  }
+}
+
+.achievement-toast-title {
+  /* Text shadow and color are set via inline styles */
+}
+
+.achievement-toast-content {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  position: relative;
+  z-index: 1;
+}
+
+.achievement-toast-icon {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border-width: 2px;
+  border-style: solid;
+  /* Border color is set via inline styles */
+  animation: icon-zoom 0.5s ease-out;
+}
+
+@keyframes icon-zoom {
+  0% {
+    transform: scale(0) rotate(-180deg);
+  }
+  70% {
+    transform: scale(1.1) rotate(5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.achievement-toast-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.achievement-toast-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: slide-in-details 0.6s ease-out 0.2s both;
+}
+
+@keyframes slide-in-details {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.achievement-toast-name {
+  font-size: 18px;
+  font-weight: bold;
+  /* Color is set via inline styles */
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  line-height: 1.3;
+}
+
+.achievement-toast-description {
+  font-size: 14px;
+  /* Color is set via inline styles */
+  line-height: 1.4;
+}
+
+.achievement-toast-game {
+  font-size: 12px;
+  /* Color is set via inline styles */
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.achievement-toast-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  /* Background is set via inline styles */
+  overflow: hidden;
+}
+
+.achievement-toast-progress-fill {
+  height: 100%;
+  /* Background is set via inline styles */
+  animation: progress-fill 6s linear;
+  transform-origin: left;
+}
+
+@keyframes progress-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Slide-in animation only - glow is handled by inline styles */
+.achievement-toast.visible {
+  animation: slide-in 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(450px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Hover effect */
+.achievement-toast:hover {
+  transform: translateX(-5px) scale(1.02);
+  filter: brightness(1.1);
+}
+
+/* Responsive design for smaller screens */
+@media (max-width: 480px) {
+  .achievement-toast-container {
+    right: 10px;
+    left: 10px;
+    max-width: none;
+  }
+
+  .achievement-toast {
+    min-width: auto;
+    padding: 16px;
+  }
+
+  .achievement-toast-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .achievement-toast-name {
+    font-size: 16px;
+  }
+
+  .achievement-toast-description {
+    font-size: 12px;
+  }
+}

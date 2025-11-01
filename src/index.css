@@ -15,3 +15,37 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Custom slider styles */
+input[type="range"].slider-thumb::-webkit-slider-thumb {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgb(96, 165, 250), rgb(59, 130, 246));
+  cursor: pointer;
+  border: 3px solid rgb(30, 41, 59);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.5), 0 4px 12px rgba(59, 130, 246, 0.4);
+  transition: all 0.2s ease;
+}
+
+input[type="range"].slider-thumb::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.7), 0 6px 16px rgba(59, 130, 246, 0.6);
+}
+
+input[type="range"].slider-thumb::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgb(96, 165, 250), rgb(59, 130, 246));
+  cursor: pointer;
+  border: 3px solid rgb(30, 41, 59);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.5), 0 4px 12px rgba(59, 130, 246, 0.4);
+  transition: all 0.2s ease;
+}
+
+input[type="range"].slider-thumb::-moz-range-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.7), 0 6px 16px rgba(59, 130, 246, 0.6);
+}

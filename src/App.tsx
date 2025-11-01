@@ -1,25 +1,69 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Save, Key, FolderOpen, CheckCircle, AlertCircle, Info, GamepadIcon, Search, Trash2, X } from 'lucide-react';
+import { Settings, Save, FolderOpen, CheckCircle, AlertCircle, Info, GamepadIcon, Search, Trash2, X, Trophy, Download, RefreshCw, Plus } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { listen } from '@tauri-apps/api/event';
+import { listen, emit } from '@tauri-apps/api/event';
+import { AchievementToastContainer } from './components/AchievementToast';
+import { RarityCustomizer } from './components/RarityCustomizer';
+import { RaritySettings, defaultRaritySettings, RarityTier } from './types/rarityTypes';
 
-type Tab = 'settings' | 'games';
+type Tab = 'settings' | 'games' | 'achievements' | 'customization';
 
 interface Config {
-  steamApiKey: string;
-  steamUserId: string;
   ludusaviPath: string;
   backupPath: string;
   autoStart: boolean;
   notificationsEnabled: boolean;
   gameExecutables: { [gameName: string]: string };
+  steamApiKey?: string;
+  steamUserId?: string;
+  steamId64?: string;
+}
+
+interface Achievement {
+  id?: number;
+  app_id: number;
+  game_name: string;
+  achievement_id: string;
+  display_name: string;
+  description: string;
+  icon_url?: string;
+  icon_gray_url?: string;
+  hidden: boolean;
+  achieved: boolean;
+  unlock_time?: number;
+  source: string;
+  last_updated: number;
+  global_unlock_percentage?: number;
+}
+
+interface GameAchievementSummary {
+  app_id: number;
+  game_name: string;
+  total_achievements: number;
+  unlocked_achievements: number;
+  source: string;
+  last_updated: number;
+}
+
+interface SteamGameSearchResult {
+  app_id: number;
+  name: string;
+  header_image?: string;
+}
+
+interface SourceOption {
+  name: string;
+  unlocked_count: number;
+  total_count: number;
+}
+
+interface AchievementSettings {
+  duration: number; // in seconds
 }
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('settings');
   const [config, setConfig] = useState<Config>({
-    steamApiKey: '',
-    steamUserId: '',
     ludusaviPath: '',
     backupPath: '',
     autoStart: true,
@@ -37,9 +81,62 @@ function App() {
   const [loadingManifest, setLoadingManifest] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-  
+
+  // Achievement state
+  const [achievementGames, setAchievementGames] = useState<GameAchievementSummary[]>([]);
+  const [selectedGame, setSelectedGame] = useState<GameAchievementSummary | null>(null);
+  const [gameAchievements, setGameAchievements] = useState<Achievement[]>([]);
+  const [loadingAchievements, setLoadingAchievements] = useState(false);
+  const [syncingAchievements, setSyncingAchievements] = useState(false);
+  const [showManualAddForm, setShowManualAddForm] = useState(false);
+
+  // Steam game search state
+  const [steamSearchQuery, setSteamSearchQuery] = useState('');
+  const [steamSearchResults, setSteamSearchResults] = useState<SteamGameSearchResult[]>([]);
+  const [searchingSteam, setSearchingSteam] = useState(false);
+  const steamSearchTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Icon cache state - stores base64 data URLs
+  const [iconCache, setIconCache] = useState<{ [url: string]: string }>({});
+
+  // Edit achievement modal state
+  const [editingAchievement, setEditingAchievement] = useState<Achievement | null>(null);
+  const [editAchieved, setEditAchieved] = useState(false);
+  const [editUnlockTime, setEditUnlockTime] = useState<string>('');
+
+  // Source selection modal state
+  const [sourceSelectionGame, setSourceSelectionGame] = useState<SteamGameSearchResult | null>(null);
+  const [availableSources, setAvailableSources] = useState<SourceOption[]>([]);
+  const [checkingSources, setCheckingSources] = useState(false);
+
   // Debounce timer ref
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Achievement customization settings
+  const [achievementSettings, setAchievementSettings] = useState<AchievementSettings>(() => {
+    const saved = localStorage.getItem('achievementSettings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return { duration: 6 };
+      }
+    }
+    return { duration: 6 }; // Default 6 seconds
+  });
+
+  // Rarity settings
+  const [raritySettings, setRaritySettings] = useState<RaritySettings>(() => {
+    const saved = localStorage.getItem('raritySettings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return defaultRaritySettings;
+      }
+    }
+    return defaultRaritySettings;
+  });
 
   const groupGamesByLetter = (games: string[]) => {
     const groups: { [key: string]: string[] } = {};
@@ -78,7 +175,8 @@ function App() {
 
   useEffect(() => {
     loadConfig();
-    
+    loadAllAchievements(); // Load achievements on app start for the tab badge
+
     // Listen for game not found events
     const unsubscribeNotFound = listen('game-not-found', (event: any) => {
       setMessage({
@@ -102,6 +200,31 @@ function App() {
     };
   }, []);
 
+  // Save achievement settings to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('achievementSettings', JSON.stringify(achievementSettings));
+
+    // Emit event to overlay window so it can update its settings
+    window.dispatchEvent(new CustomEvent('achievement-settings-updated', {
+      detail: achievementSettings
+    }));
+  }, [achievementSettings]);
+
+  // Save rarity settings to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('raritySettings', JSON.stringify(raritySettings));
+
+    // Emit Tauri event to ALL windows (including overlay)
+    emit('rarity-settings-sync', raritySettings).catch((error) => {
+      console.error('Failed to emit rarity settings:', error);
+    });
+
+    // Also emit local event for same-window components
+    window.dispatchEvent(new CustomEvent('rarity-settings-updated', {
+      detail: raritySettings
+    }));
+  }, [raritySettings]);
+
   // Debounced search effect
   useEffect(() => {
     // Clear previous timer
@@ -122,7 +245,7 @@ function App() {
     // Set new debounce timer (1000ms delay)
     debounceTimerRef.current = setTimeout(() => {
       const query = searchQuery.toLowerCase();
-      const results = ludusaviGames.filter(game => 
+      const results = ludusaviGames.filter(game =>
         game.toLowerCase().includes(query)
       );
       setFilteredGames(results);
@@ -136,6 +259,89 @@ function App() {
       }
     };
   }, [searchQuery, ludusaviGames]);
+
+  // Debounced Steam search effect
+  useEffect(() => {
+    if (steamSearchTimerRef.current) {
+      clearTimeout(steamSearchTimerRef.current);
+    }
+
+    if (!steamSearchQuery.trim()) {
+      setSteamSearchResults([]);
+      setSearchingSteam(false);
+      return;
+    }
+
+    setSearchingSteam(true);
+
+    steamSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const results = await invoke<SteamGameSearchResult[]>('search_steam_games', {
+          query: steamSearchQuery
+        });
+        setSteamSearchResults(results);
+      } catch (error) {
+        console.error('Failed to search Steam games:', error);
+        setMessage({
+          type: 'error',
+          text: `Failed to search: ${error}`
+        });
+        setSteamSearchResults([]);
+      } finally {
+        setSearchingSteam(false);
+      }
+    }, 500);
+
+    return () => {
+      if (steamSearchTimerRef.current) {
+        clearTimeout(steamSearchTimerRef.current);
+      }
+    };
+  }, [steamSearchQuery]);
+
+  // Listen for achievement unlock events and update UI
+  useEffect(() => {
+    const setupListener = async () => {
+      const unlisten = await listen<Achievement>('achievement-unlocked', (event) => {
+        const unlockedAch = event.payload;
+        console.log('🏆 Achievement unlocked event received in App:', unlockedAch);
+
+        // Update gameAchievements if this achievement is for the currently selected game
+        setGameAchievements(prev => {
+          if (prev.length === 0) return prev;
+          const index = prev.findIndex(a => a.achievement_id === unlockedAch.achievement_id);
+          if (index !== -1) {
+            const updated = [...prev];
+            updated[index] = { ...updated[index], achieved: true, unlock_time: unlockedAch.unlock_time };
+            return updated;
+          }
+          return prev;
+        });
+
+        // Update achievementGames to increment unlocked count
+        setAchievementGames(prev => {
+          const gameIndex = prev.findIndex(g => g.app_id === unlockedAch.app_id);
+          if (gameIndex !== -1) {
+            const updated = [...prev];
+            updated[gameIndex] = {
+              ...updated[gameIndex],
+              unlocked_achievements: updated[gameIndex].unlocked_achievements + 1
+            };
+            return updated;
+          }
+          return prev;
+        });
+      });
+
+      return unlisten;
+    };
+
+    let unlistenPromise = setupListener();
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
+  }, []);
 
   const loadConfig = async () => {
     try {
@@ -184,9 +390,9 @@ function App() {
   const handleSave = async () => {
     setSaving(true);
     setMessage(null);
-    
+
     try {
-      if (!config.steamApiKey || !config.steamUserId || !config.ludusaviPath || !config.backupPath) {
+      if (!config.ludusaviPath || !config.backupPath) {
         setMessage({
           type: 'error',
           text: 'Please fill in all required fields'
@@ -337,6 +543,326 @@ function App() {
     }
   };
 
+  const loadAllAchievements = async () => {
+    setLoadingAchievements(true);
+    try {
+      const games = await invoke<GameAchievementSummary[]>('get_all_achievements');
+      setAchievementGames(games);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to load achievements: ${error}`
+      });
+    } finally {
+      setLoadingAchievements(false);
+    }
+  };
+
+  const loadGameAchievements = async (game: GameAchievementSummary) => {
+    setLoadingAchievements(true);
+    setSelectedGame(game);
+    try {
+      const achievements = await invoke<Achievement[]>('get_game_achievements', { appId: game.app_id });
+      // Debug: Log first achievement to see icon URLs
+      if (achievements.length > 0) {
+        console.log('First achievement data:', achievements[0]);
+        console.log('Icon URL:', achievements[0].icon_url);
+        console.log('Icon Gray URL:', achievements[0].icon_gray_url);
+      }
+      setGameAchievements(achievements);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to load achievements for ${game.game_name}: ${error}`
+      });
+    } finally {
+      setLoadingAchievements(false);
+    }
+  };
+
+  const handleSyncAchievements = async () => {
+    setSyncingAchievements(true);
+    try {
+      const result = await invoke<string>('sync_achievements');
+      setMessage({
+        type: 'success',
+        text: result
+      });
+      // Reload achievements after sync
+      await loadAllAchievements();
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to sync achievements: ${error}`
+      });
+    } finally {
+      setSyncingAchievements(false);
+    }
+  };
+
+  const handleAddGameToTracking = async (game: SteamGameSearchResult) => {
+    try {
+      setCheckingSources(true);
+      setMessage({
+        type: 'success' as any,
+        text: `Checking sources for ${game.name}...`
+      });
+
+      // Call backend to check which sources have this game
+      const sources = await invoke<SourceOption[]>('check_game_sources', {
+        appId: game.app_id,
+        gameName: game.name
+      });
+
+      setAvailableSources(sources);
+      setSourceSelectionGame(game);
+      setCheckingSources(false);
+      setMessage(null);
+    } catch (error) {
+      setCheckingSources(false);
+      setMessage({
+        type: 'error',
+        text: `Failed to check sources: ${error}`
+      });
+    }
+  };
+
+  const handleConfirmSourceSelection = async (source: string) => {
+    if (!sourceSelectionGame) return;
+
+    try {
+      setMessage({
+        type: 'success' as any,
+        text: `Adding ${sourceSelectionGame.name} from ${source}...`
+      });
+
+      // Call backend to add from selected source
+      const result = await invoke<string>('add_game_from_source', {
+        appId: sourceSelectionGame.app_id,
+        gameName: sourceSelectionGame.name,
+        source: source
+      });
+
+      setMessage({
+        type: 'success',
+        text: result
+      });
+
+      // Check if backup exists for this game
+      const backupPath = await invoke<string | null>('check_backup_exists', {
+        gameName: sourceSelectionGame.name
+      });
+
+      if (backupPath) {
+        // Ask user if they want to restore from backup
+        const restore = window.confirm(
+          `A backup file was found for ${sourceSelectionGame.name}.\n\n` +
+          `Would you like to restore achievements from the backup?\n\n` +
+          `The backup will be imported while still monitoring the selected source for new achievements.`
+        );
+
+        if (restore) {
+          try {
+            const restoredCount = await invoke<number>('restore_from_backup', {
+              appId: sourceSelectionGame.app_id,
+              gameName: sourceSelectionGame.name,
+              backupPath: backupPath
+            });
+
+            setMessage({
+              type: 'success',
+              text: `Successfully restored ${restoredCount} achievements from backup. Now monitoring ${source} for new achievements.`
+            });
+          } catch (error) {
+            setMessage({
+              type: 'error',
+              text: `Failed to restore backup: ${error}`
+            });
+          }
+        }
+      }
+
+      // Reload achievement games list
+      await loadAllAchievements();
+
+      // Clear search and close modal
+      setSteamSearchQuery('');
+      setSteamSearchResults([]);
+      setSourceSelectionGame(null);
+      setAvailableSources([]);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to add game: ${error}`
+      });
+    }
+  };
+
+  const handleExportGameAchievements = async (appId: number, gameName: string) => {
+    try {
+      const result = await invoke<string>('export_game_achievements', {
+        appId: appId,
+        gameName: gameName
+      });
+      setMessage({
+        type: 'success',
+        text: result
+      });
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to export achievements: ${error}`
+      });
+    }
+  };
+
+  const handleRemoveGame = async (appId: number, gameName: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent opening game details when clicking remove
+
+    try {
+      const result = await invoke<string>('remove_game_from_tracking', { appId });
+      setMessage({
+        type: 'success',
+        text: `Removed ${gameName}`
+      });
+
+      // Reload achievement games list
+      await loadAllAchievements();
+
+      // Close details if this was the selected game
+      if (selectedGame?.app_id === appId) {
+        setSelectedGame(null);
+        setGameAchievements([]);
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to remove game: ${error}`
+      });
+    }
+  };
+
+  // Helper function to get achievement icon (fetched through backend)
+  const getAchievementIcon = async (url: string | undefined): Promise<string | undefined> => {
+    if (!url) return undefined;
+
+    // Check cache first
+    if (iconCache[url]) {
+      return iconCache[url];
+    }
+
+    // Fetch through backend
+    try {
+      const base64Data = await invoke<string>('fetch_achievement_icon', { url });
+      // Cache it
+      setIconCache(prev => ({ ...prev, [url]: base64Data }));
+      return base64Data;
+    } catch (error) {
+      console.error('Failed to fetch icon:', error);
+      return undefined;
+    }
+  };
+
+  const handleAchievementClick = (achievement: Achievement) => {
+    setEditingAchievement(achievement);
+    setEditAchieved(achievement.achieved);
+
+    // Convert Unix timestamp to datetime-local format
+    if (achievement.unlock_time) {
+      const date = new Date(achievement.unlock_time * 1000);
+      const localDateTime = date.getFullYear() + '-' +
+        String(date.getMonth() + 1).padStart(2, '0') + '-' +
+        String(date.getDate()).padStart(2, '0') + 'T' +
+        String(date.getHours()).padStart(2, '0') + ':' +
+        String(date.getMinutes()).padStart(2, '0');
+      setEditUnlockTime(localDateTime);
+    } else {
+      // Default to current time
+      const now = new Date();
+      const localDateTime = now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0') + 'T' +
+        String(now.getHours()).padStart(2, '0') + ':' +
+        String(now.getMinutes()).padStart(2, '0');
+      setEditUnlockTime(localDateTime);
+    }
+  };
+
+  const handleCloseEditModal = () => {
+    setEditingAchievement(null);
+    setEditAchieved(false);
+    setEditUnlockTime('');
+  };
+
+  const handleSaveAchievement = async () => {
+    if (!editingAchievement?.id) return;
+
+    try {
+      // Convert datetime-local to Unix timestamp
+      let unlockTime: number | null = null;
+      if (editAchieved && editUnlockTime) {
+        const date = new Date(editUnlockTime);
+        unlockTime = Math.floor(date.getTime() / 1000);
+      }
+
+      await invoke('update_achievement_status', {
+        achievementId: editingAchievement.id,
+        achieved: editAchieved,
+        unlockTime: editAchieved ? unlockTime : null
+      });
+
+      setMessage({
+        type: 'success',
+        text: `Achievement "${editingAchievement.display_name}" updated successfully!`
+      });
+
+      // Reload achievements for this game
+      if (selectedGame) {
+        await loadGameAchievements(selectedGame);
+      }
+
+      // Reload all achievements to update the game card count
+      await loadAllAchievements();
+
+      // Close modal
+      handleCloseEditModal();
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to update achievement: ${error}`
+      });
+    }
+  };
+
+  // Component for rendering achievement icons
+  const AchievementIcon: React.FC<{ achievement: Achievement }> = ({ achievement }) => {
+    const [hasError, setHasError] = useState(false);
+    const iconUrl = achievement.achieved ? achievement.icon_url : achievement.icon_gray_url;
+
+    // If no icon URL or previous error, show trophy
+    if (!iconUrl || hasError) {
+      return (
+        <div className={`flex-shrink-0 p-3 rounded-lg ${
+          achievement.achieved ? 'bg-emerald-600/20' : 'bg-gray-700/20'
+        }`}>
+          <Trophy className={`w-10 h-10 ${
+            achievement.achieved ? 'text-emerald-400' : 'text-gray-600'
+          }`} />
+        </div>
+      );
+    }
+
+    // Try to load the image directly with error handling
+    return (
+      <img
+        src={iconUrl}
+        alt={achievement.display_name}
+        className="w-16 h-16 flex-shrink-0 rounded-lg border-2 border-[#2a3142] object-cover"
+        onError={() => setHasError(true)}
+      />
+    );
+  };
+
   const configuredGames = Object.keys(config.gameExecutables);
 
   return (
@@ -400,6 +926,46 @@ function App() {
                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-t" />
               )}
             </button>
+            <button
+              onClick={() => {
+                setActiveTab('achievements');
+                if (achievementGames.length === 0) {
+                  loadAllAchievements();
+                }
+              }}
+              className={`px-6 py-4 font-semibold transition-all relative ${
+                activeTab === 'achievements'
+                  ? 'text-blue-400 bg-[#1a1f3a]'
+                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#13172a]'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Trophy className="w-5 h-5" />
+                <span>Achievements</span>
+                <span className="ml-1 px-2 py-0.5 bg-amber-600/30 text-amber-300 text-xs rounded-full border border-amber-500/30">
+                  {achievementGames.length}
+                </span>
+              </div>
+              {activeTab === 'achievements' && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-t" />
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('customization')}
+              className={`px-6 py-4 font-semibold transition-all relative ${
+                activeTab === 'customization'
+                  ? 'text-blue-400 bg-[#1a1f3a]'
+                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#13172a]'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5" />
+                <span>Achievement Customization</span>
+              </div>
+              {activeTab === 'customization' && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-t" />
+              )}
+            </button>
           </div>
         </div>
       </div>
@@ -434,10 +1000,10 @@ function App() {
             <div className="bg-blue-950/30 border border-blue-600/30 rounded-xl p-5 flex gap-4 shadow-lg">
               <Info className="w-6 h-6 text-blue-400 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-blue-100/90 space-y-1">
-                <p className="font-semibold text-blue-300 text-base mb-2">How to get your Steam User ID:</p>
-                <p>1. Go to <a href="https://steamcommunity.com" target="_blank" className="text-blue-400 underline hover:text-blue-300 font-medium">steamcommunity.com</a></p>
-                <p>2. Click your profile name → Your Steam64 ID is in the URL</p>
-                <p className="mt-2">Example: <span className="text-blue-300 font-mono">steamcommunity.com/profiles/<strong className="text-blue-200">76561198012345678</strong></span></p>
+                <p className="font-semibold text-blue-300 text-base mb-2">🎮 Steamworks Integration</p>
+                <p>✓ This app uses Steamworks SDK for automatic Steam game detection</p>
+                <p>✓ Achievement tracking requires a Steam Web API Key</p>
+                <p>✓ Get your free API key at: <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">steamcommunity.com/dev/apikey</a></p>
               </div>
             </div>
 
@@ -446,43 +1012,6 @@ function App() {
               <div className="flex items-center gap-3 pb-4 border-b border-[#2a3142]">
                 <Settings className="w-7 h-7 text-blue-400" />
                 <h2 className="text-2xl font-bold text-white">Configuration</h2>
-              </div>
-
-              {/* Steam API Key */}
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-gray-200 flex items-center gap-2">
-                  <Key className="w-4 h-4 text-blue-400" />
-                  Steam Web API Key
-                  <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="password"
-                  value={config.steamApiKey}
-                  onChange={(e) => setConfig({ ...config, steamApiKey: e.target.value })}
-                  placeholder="Enter your Steam API key"
-                  className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
-                />
-                <p className="text-xs text-gray-400 flex items-center gap-1">
-                  Get your API key at: 
-                  <a href="https://steamcommunity.com/dev/apikey" target="_blank" className="text-blue-400 hover:text-blue-300 underline font-medium">
-                    steamcommunity.com/dev/apikey
-                  </a>
-                </p>
-              </div>
-
-              {/* Steam User ID */}
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-gray-200 flex items-center gap-2">
-                  Steam User ID (Steam64)
-                  <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={config.steamUserId}
-                  onChange={(e) => setConfig({ ...config, steamUserId: e.target.value })}
-                  placeholder="76561198012345678"
-                  className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
-                />
               </div>
 
               {/* Ludusavi Path */}
@@ -540,6 +1069,63 @@ function App() {
                 </div>
               </div>
 
+              {/* Steam API Key */}
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-gray-200 flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  Steam Web API Key
+                  <span className="text-amber-400 text-xs">(Required for Achievements)</span>
+                </label>
+                <input
+                  type="text"
+                  value={config.steamApiKey || ''}
+                  onChange={(e) => setConfig({ ...config, steamApiKey: e.target.value })}
+                  placeholder="Get your API key from steamcommunity.com/dev/apikey"
+                  className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-sm"
+                />
+                <p className="text-xs text-gray-400">
+                  Your API key is stored locally and only used to fetch achievement data from Steam
+                </p>
+              </div>
+
+              {/* Steam User ID */}
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-gray-200 flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-blue-400" />
+                  Steam User ID
+                  <span className="text-blue-400 text-xs">(Optional - for local achievement detection)</span>
+                </label>
+                <input
+                  type="text"
+                  value={config.steamUserId || ''}
+                  onChange={(e) => setConfig({ ...config, steamUserId: e.target.value })}
+                  placeholder="247367579"
+                  className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-sm"
+                />
+                <p className="text-xs text-gray-400">
+                  Your Steam3 ID number (find it in C:\Program Files (x86)\Steam\userdata\). If not set, the first user will be used.
+                </p>
+              </div>
+
+              {/* Steam64 ID */}
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-gray-200 flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-purple-400" />
+                  Steam64 ID
+                  <span className="text-purple-400 text-xs">(Optional - for fetching your achievement unlock status from Steam API)</span>
+                </label>
+                <input
+                  type="text"
+                  value={config.steamId64 || ''}
+                  onChange={(e) => setConfig({ ...config, steamId64: e.target.value })}
+                  placeholder="76561198207633307"
+                  className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-sm"
+                />
+                <p className="text-xs text-gray-400">
+                  Your Steam64 ID (find it on steamid.io or steamidfinder.com). Used to fetch your personal achievement unlock times from Steam Web API.
+                </p>
+              </div>
+
               {/* Auto Start Toggle */}
               <div className="flex items-center justify-between bg-[#0f1420] p-5 rounded-lg border-2 border-[#2a3142]">
                 <div>
@@ -581,7 +1167,7 @@ function App() {
               </div>
 
               {/* Save Button */}
-              <div className="pt-6 border-t border-[#2a3142]">
+              <div className="pt-3">
                 <button
                   onClick={handleSave}
                   disabled={saving}
@@ -751,7 +1337,615 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* Achievements Tab */}
+        {activeTab === 'achievements' && (
+          <div className="space-y-6">
+            {/* Top Row: Add Game + Filter Games */}
+            <div className="grid grid-cols-2 gap-6">
+              {/* Left: Add New Game */}
+              <div className="bg-[#1a1f3a] rounded-xl p-5 border border-[#2a3142] shadow-xl">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="p-1.5 bg-amber-600/20 rounded-lg border border-amber-500/30">
+                    <Trophy className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Add New Game</h3>
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={steamSearchQuery}
+                    onChange={(e) => setSteamSearchQuery(e.target.value)}
+                    placeholder="Search Steam games..."
+                    className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg pl-10 pr-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                  {searchingSteam && (
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-700 border-t-blue-500"></div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Search Results */}
+                {steamSearchResults.length > 0 && (
+                  <div className="mt-3 bg-[#0f1420] rounded-lg border border-[#2a3142] max-h-40 overflow-y-auto">
+                    <div className="divide-y divide-[#2a3142]">
+                      {steamSearchResults.map((game) => (
+                        <button
+                          key={game.app_id}
+                          onClick={() => handleAddGameToTracking(game)}
+                          className="w-full p-3 hover:bg-[#13172a] transition-colors flex items-center justify-between group text-left"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-white text-sm group-hover:text-blue-400 transition-colors truncate">
+                              {game.name}
+                            </p>
+                          </div>
+                          <Plus className="w-4 h-4 text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Filter Added Games */}
+              <div className="bg-[#1a1f3a] rounded-xl p-5 border border-[#2a3142] shadow-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-blue-600/20 rounded-lg border border-blue-500/30">
+                      <Search className="w-5 h-5 text-blue-400" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white">Filter Games</h3>
+                  </div>
+                </div>
+
+                {/* Filter Input */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Filter added games..."
+                    className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg pl-10 pr-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Game Library Grid */}
+            {loadingAchievements && achievementGames.length === 0 ? (
+              <div className="bg-[#1a1f3a] rounded-xl p-12 border border-[#2a3142] shadow-xl text-center">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-700 border-t-blue-500 mb-4"></div>
+                <p className="text-gray-400 font-medium">Loading games...</p>
+              </div>
+            ) : achievementGames.length === 0 ? (
+              <div className="bg-[#1a1f3a] rounded-xl p-12 border border-[#2a3142] shadow-xl text-center">
+                <Trophy className="w-16 h-16 mx-auto mb-4 opacity-50 text-gray-600" />
+                <p className="text-gray-400 font-medium mb-4">No games added yet</p>
+                <p className="text-sm text-gray-500">Search for a Steam game above to start tracking achievements</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-4">
+                {achievementGames
+                  .filter(game =>
+                    searchQuery.trim() === '' ||
+                    game.game_name.toLowerCase().includes(searchQuery.toLowerCase())
+                  )
+                  .map(game => {
+                    const percentage = Math.round((game.unlocked_achievements / game.total_achievements) * 100);
+                    return (
+                      <div
+                        key={`${game.app_id}-${game.source}`}
+                        className="bg-[#1a1f3a] rounded-xl border border-[#2a3142] shadow-xl hover:border-blue-500/50 transition-all cursor-pointer overflow-hidden group relative"
+                        onClick={() => loadGameAchievements(game)}
+                      >
+                        {/* Remove Button */}
+                        <button
+                          onClick={(e) => handleRemoveGame(game.app_id, game.game_name, e)}
+                          className="absolute top-2 right-2 z-10 p-1.5 bg-red-600/90 hover:bg-red-500 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-lg border border-red-500/50"
+                          title="Remove game"
+                        >
+                          <X className="w-4 h-4 text-white" />
+                        </button>
+
+                        {/* Game Header Image */}
+                        <div className="h-32 relative overflow-hidden">
+                          <img
+                            src={`https://cdn.cloudflare.steamstatic.com/steam/apps/${game.app_id}/header.jpg`}
+                            alt={game.game_name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              // Fallback to gradient if image fails to load
+                              e.currentTarget.style.display = 'none';
+                              if (e.currentTarget.parentElement) {
+                                e.currentTarget.parentElement.className = 'h-32 bg-gradient-to-br from-blue-900/30 to-purple-900/30 relative overflow-hidden';
+                              }
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-all" />
+                          <div className="absolute bottom-2 left-3 right-3">
+                            <div className="text-xs font-semibold text-white/90">
+                              {game.unlocked_achievements} / {game.total_achievements}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Game Info */}
+                        <div className="p-3">
+                          <h3 className="text-sm font-bold text-white line-clamp-2 mb-2 group-hover:text-blue-400 transition-colors">
+                            {game.game_name}
+                          </h3>
+
+                          {/* Progress bar */}
+                          <div className="bg-[#0f1420] rounded-full h-2 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-blue-600 to-emerald-500 transition-all duration-500"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-xs text-gray-400">{percentage}% Complete</span>
+                            <span className="text-xs text-blue-400">{game.source}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+
+            {/* Achievement Details Modal/Panel - Keep existing */}
+            {selectedGame && (
+              <div className="bg-[#1a1f3a] rounded-xl border border-[#2a3142] shadow-xl overflow-hidden">
+                <div className="p-6 bg-[#13172a] border-b border-[#2a3142]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-2xl font-bold text-white">{selectedGame.game_name}</h3>
+                      <p className="text-sm text-gray-400 mt-1">
+                        {selectedGame.unlocked_achievements} of {selectedGame.total_achievements} achievements unlocked
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => handleExportGameAchievements(selectedGame.app_id, selectedGame.game_name)}
+                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-semibold transition-all shadow-lg hover:shadow-emerald-500/20 border border-emerald-500/30"
+                      >
+                        <Download className="w-4 h-4" />
+                        Export
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedGame(null);
+                          setGameAchievements([]);
+                        }}
+                        className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="max-h-[600px] overflow-y-auto p-6 space-y-3">
+                  {loadingAchievements ? (
+                    <div className="text-center py-12">
+                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-3 border-gray-700 border-t-blue-500 mb-3"></div>
+                      <p className="text-gray-400">Loading achievements...</p>
+                    </div>
+                  ) : gameAchievements.length === 0 ? (
+                    <div className="text-center py-12 text-gray-400">
+                      <p>No achievement details found</p>
+                    </div>
+                  ) : (
+                    gameAchievements.map(achievement => (
+                      <div
+                        key={achievement.achievement_id}
+                        onClick={() => handleAchievementClick(achievement)}
+                        className={`p-4 rounded-lg border-2 transition-all cursor-pointer hover:scale-[1.02] ${
+                          achievement.achieved
+                            ? 'bg-emerald-950/30 border-emerald-600/40 hover:border-emerald-500/60'
+                            : 'bg-[#0f1420] border-[#2a3142] hover:border-blue-500/60'
+                        }`}
+                      >
+                        <div className="flex items-start gap-4">
+                          {/* Achievement Icon */}
+                          <AchievementIcon achievement={achievement} />
+                          <div className="flex-1 min-w-0">
+                            <h4 className={`font-bold ${
+                              achievement.achieved ? 'text-emerald-300' : 'text-white'
+                            }`}>
+                              {achievement.display_name}
+                            </h4>
+                            {achievement.description && (
+                              <p className="text-sm text-gray-400 mt-1">{achievement.description}</p>
+                            )}
+                            {achievement.unlock_time && (
+                              <p className="text-xs text-gray-500 mt-2">
+                                Unlocked: {new Date(achievement.unlock_time * 1000).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                          {achievement.achieved && (
+                            <CheckCircle className="flex-shrink-0 w-6 h-6 text-emerald-400" />
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Customization Tab */}
+        {activeTab === 'customization' && (
+          <div className="space-y-6">
+            {/* Achievement Customization Section */}
+            <div className="bg-[#1a1f3a] rounded-xl p-8 border border-[#2a3142] shadow-xl space-y-8">
+              <div className="flex items-center gap-3 pb-4 border-b border-[#2a3142]">
+                <div className="p-2 bg-amber-600/20 rounded-lg border border-amber-500/30">
+                  <Trophy className="w-7 h-7 text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-white">Achievement Customization</h2>
+                  <p className="text-gray-400 text-sm mt-1">Customize how achievement notifications appear</p>
+                </div>
+              </div>
+
+              {/* Duration Slider */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-200">
+                      Notification Duration
+                    </label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      How long achievement notifications stay on screen
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-bold text-blue-400">{achievementSettings.duration}</span>
+                    <span className="text-sm text-gray-400 ml-1">seconds</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <input
+                    type="range"
+                    min="2"
+                    max="10"
+                    step="1"
+                    value={achievementSettings.duration}
+                    onChange={(e) => setAchievementSettings({ ...achievementSettings, duration: parseInt(e.target.value) })}
+                    className="w-full h-3 bg-[#0f1420] rounded-lg appearance-none cursor-pointer slider-thumb"
+                    style={{
+                      background: `linear-gradient(to right, rgb(59, 130, 246) 0%, rgb(59, 130, 246) ${((achievementSettings.duration - 2) / 8) * 100}%, rgb(15, 20, 32) ${((achievementSettings.duration - 2) / 8) * 100}%, rgb(15, 20, 32) 100%)`
+                    }}
+                  />
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>2s</span>
+                    <span>3s</span>
+                    <span>4s</span>
+                    <span>5s</span>
+                    <span>6s</span>
+                    <span>7s</span>
+                    <span>8s</span>
+                    <span>9s</span>
+                    <span>10s</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Test Notification Button */}
+              <div className="pt-6 border-t border-[#2a3142]">
+                <button
+                  onClick={async () => {
+                    try {
+                      await invoke('test_overlay');
+                      console.log('Test overlay triggered');
+                    } catch (error) {
+                      console.error('Failed to test overlay:', error);
+                    }
+                  }}
+                  className="w-full bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white font-bold py-3 rounded-lg transition-all shadow-lg hover:shadow-purple-500/30 border border-purple-400/30"
+                >
+                  🎮 Test Achievement Notification
+                </button>
+              </div>
+
+              {/* Rarity Toggle */}
+              <div className="pt-6 border-t border-[#2a3142]">
+                <div className="flex items-center justify-between bg-[#0f1420] p-5 rounded-lg border-2 border-[#2a3142]">
+                  <div>
+                    <h3 className="font-semibold text-white text-base">Enable Rarity-Based Notifications</h3>
+                    <p className="text-sm text-gray-400 mt-1">
+                      Use different styles based on achievement rarity (determined by global unlock percentage)
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setRaritySettings({ ...raritySettings, enabled: !raritySettings.enabled })}
+                    className={`relative w-16 h-9 rounded-full transition-all shadow-inner ${
+                      raritySettings.enabled ? 'bg-blue-600' : 'bg-gray-700'
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-1 left-1 w-7 h-7 bg-white rounded-full shadow-lg transition-transform ${
+                        raritySettings.enabled ? 'transform translate-x-7' : ''
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Rarity Customizers */}
+              {raritySettings.enabled && (
+                <div className="pt-6 border-t border-[#2a3142] space-y-4">
+                  <div className="bg-blue-950/30 border border-blue-600/30 rounded-xl p-5 flex gap-4">
+                    <Info className="w-6 h-6 text-blue-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-blue-100/90">
+                      <p className="font-semibold text-blue-300 text-base mb-2">Rarity System</p>
+                      <p>Achievements are categorized by their global unlock percentage:</p>
+                      <ul className="list-disc list-inside mt-2 space-y-1">
+                        <li><span className="font-semibold text-gray-300">Common:</span> 90%+ of players have unlocked</li>
+                        <li><span className="font-semibold text-green-400">Uncommon:</span> 60-89% unlock rate</li>
+                        <li><span className="font-semibold text-blue-400">Rare:</span> 35-59% unlock rate</li>
+                        <li><span className="font-semibold text-purple-400">Ultra Rare:</span> 15-34% unlock rate</li>
+                        <li><span className="font-semibold text-amber-400">Legendary:</span> 0-14% unlock rate</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Rarity Customizers */}
+                  {(['Common', 'Uncommon', 'Rare', 'Ultra Rare', 'Legendary'] as RarityTier[]).map((rarity) => (
+                    <RarityCustomizer
+                      key={rarity}
+                      rarity={rarity}
+                      settings={raritySettings[rarity]}
+                      onChange={(newSettings) => {
+                        setRaritySettings({
+                          ...raritySettings,
+                          [rarity]: newSettings,
+                        });
+                      }}
+                      onTest={async () => {
+                        try {
+                          await invoke('test_rarity_notification', { rarity });
+                          console.log(`Test ${rarity} notification triggered`);
+                        } catch (error) {
+                          console.error(`Failed to test ${rarity} notification:`, error);
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Preview Info */}
+              <div className="bg-blue-950/30 border border-blue-600/30 rounded-xl p-5 flex gap-4">
+                <Info className="w-6 h-6 text-blue-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-100/90 space-y-1">
+                  <p className="font-semibold text-blue-300 text-base mb-2">Preview</p>
+                  <p>Click the "Test Achievement Notification" button or individual rarity test buttons to preview your customization settings.</p>
+                  <p className="text-xs text-blue-200/70 mt-2">Changes are saved automatically and will apply to all future achievement notifications.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Achievement Edit Modal */}
+      {editingAchievement && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-8" onClick={handleCloseEditModal}>
+          <div className="bg-[#1a1f3a] rounded-xl border-2 border-[#2a3142] shadow-2xl w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="p-6 border-b border-[#2a3142] bg-[#13172a]">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-4 flex-1">
+                  <AchievementIcon achievement={editingAchievement} />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xl font-bold text-white">{editingAchievement.display_name}</h3>
+                    {editingAchievement.description && (
+                      <p className="text-sm text-gray-400 mt-1">{editingAchievement.description}</p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={handleCloseEditModal}
+                  className="p-2 hover:bg-white/10 rounded-lg transition-colors ml-4"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6">
+              {/* Achievement Status Toggle */}
+              <div className="flex items-center justify-between bg-[#0f1420] p-5 rounded-lg border-2 border-[#2a3142]">
+                <div>
+                  <h4 className="font-semibold text-white text-base">Achievement Status</h4>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {editAchieved ? 'Marked as unlocked' : 'Marked as locked'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEditAchieved(!editAchieved)}
+                  className={`relative w-16 h-9 rounded-full transition-all shadow-inner ${
+                    editAchieved ? 'bg-emerald-600' : 'bg-gray-700'
+                  }`}
+                >
+                  <div
+                    className={`absolute top-1 left-1 w-7 h-7 bg-white rounded-full shadow-lg transition-transform ${
+                      editAchieved ? 'transform translate-x-7' : ''
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Unlock Time Input */}
+              {editAchieved && (
+                <div className="space-y-3">
+                  <label className="block text-sm font-semibold text-gray-200 flex items-center gap-2">
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                    Unlock Date & Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={editUnlockTime}
+                    onChange={(e) => setEditUnlockTime(e.target.value)}
+                    className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-sm"
+                  />
+
+                  {/* Timestamp Converter */}
+                  <div className="pt-2">
+                    <label className="block text-xs font-semibold text-gray-400 mb-2">
+                      Or paste Unix timestamp (seconds):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g., 1234567890"
+                      onPaste={(e) => {
+                        const pastedText = e.clipboardData.getData('text');
+                        const timestamp = parseInt(pastedText.trim());
+                        if (!isNaN(timestamp) && timestamp > 0) {
+                          const date = new Date(timestamp * 1000);
+                          const localDateTime = date.getFullYear() + '-' +
+                            String(date.getMonth() + 1).padStart(2, '0') + '-' +
+                            String(date.getDate()).padStart(2, '0') + 'T' +
+                            String(date.getHours()).padStart(2, '0') + ':' +
+                            String(date.getMinutes()).padStart(2, '0');
+                          setEditUnlockTime(localDateTime);
+                          e.currentTarget.value = '';
+                        }
+                      }}
+                      className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg px-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Paste a Unix timestamp and it will automatically convert to a date/time
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Source Info */}
+              <div className="bg-blue-950/30 border border-blue-600/30 rounded-lg p-4 flex gap-3">
+                <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-100/90">
+                  <p className="font-semibold text-blue-300 mb-1">Achievement Source: {editingAchievement.source}</p>
+                  <p>Manual changes will override data from this source.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-[#2a3142] bg-[#13172a] flex gap-3">
+              <button
+                onClick={handleCloseEditModal}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 rounded-lg transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAchievement}
+                className="flex-1 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-semibold py-3 rounded-lg transition-all shadow-lg hover:shadow-emerald-500/30"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Source Selection Modal */}
+      {sourceSelectionGame && availableSources.length > 0 && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-8" onClick={() => {
+          setSourceSelectionGame(null);
+          setAvailableSources([]);
+        }}>
+          <div className="bg-[#1a1f3a] rounded-xl border-2 border-[#2a3142] shadow-2xl w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="p-6 border-b border-[#2a3142] bg-[#13172a]">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-white">Select Achievement Source</h3>
+                  <p className="text-sm text-gray-400 mt-1">Choose which source to use for {sourceSelectionGame.name}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSourceSelectionGame(null);
+                    setAvailableSources([]);
+                  }}
+                  className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {availableSources.map((source) => (
+                <button
+                  key={source.name}
+                  onClick={() => handleConfirmSourceSelection(source.name)}
+                  className="w-full bg-[#0f1420] hover:bg-[#13172a] border-2 border-[#2a3142] hover:border-blue-500 rounded-lg p-5 transition-all text-left group"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-white text-lg group-hover:text-blue-400 transition-colors">
+                        {source.name}
+                      </h4>
+                      <div className="flex items-center gap-4 mt-2">
+                        <div className="flex items-center gap-2">
+                          <Trophy className="w-4 h-4 text-amber-400" />
+                          <span className="text-sm text-gray-300">
+                            <span className="font-semibold text-emerald-400">{source.unlocked_count}</span>
+                            <span className="text-gray-500"> / </span>
+                            <span className="font-semibold text-white">{source.total_count}</span>
+                            <span className="text-gray-500 ml-1">achievements</span>
+                          </span>
+                        </div>
+                        {source.unlocked_count > 0 && (
+                          <div className="flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/30 rounded px-2 py-0.5">
+                            <CheckCircle className="w-3 h-3 text-emerald-400" />
+                            <span className="text-xs text-emerald-300 font-medium">
+                              {Math.round((source.unlocked_count / source.total_count) * 100)}% Complete
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-blue-400 group-hover:translate-x-1 transition-transform">
+                      →
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-[#2a3142] bg-[#0f1420] rounded-b-xl">
+              <div className="flex gap-3 text-sm text-gray-400">
+                <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <p>
+                  Select the source with the most complete achievement data. You can manually add missing achievements later.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Achievement Toast Notifications */}
+      <AchievementToastContainer />
     </div>
   );
 }
