@@ -30,6 +30,14 @@ pub struct GameAchievementSummary {
     pub last_updated: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Exclusion {
+    pub id: Option<i64>,
+    pub app_id: u32,
+    pub name: String,
+    pub added_at: i64,
+}
+
 pub struct AchievementDatabase {
     conn: Connection,
 }
@@ -82,6 +90,41 @@ impl AchievementDatabase {
             "CREATE INDEX IF NOT EXISTS idx_achieved ON achievements(achieved)",
             [],
         ).map_err(|e| format!("Failed to create index: {}", e))?;
+
+        // Create exclusions table for apps/games to ignore
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS exclusions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_id INTEGER NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                added_at INTEGER NOT NULL
+            )",
+            [],
+        ).map_err(|e| format!("Failed to create exclusions table: {}", e))?;
+
+        // Pre-populate with default exclusions if table is empty
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM exclusions",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        if count == 0 {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+
+            // Add default exclusions
+            let _ = self.conn.execute(
+                "INSERT INTO exclusions (app_id, name, added_at) VALUES (?1, ?2, ?3)",
+                params![388080, "Borderless Gaming", now],
+            );
+            let _ = self.conn.execute(
+                "INSERT INTO exclusions (app_id, name, added_at) VALUES (?1, ?2, ?3)",
+                params![431960, "Wallpaper Engine", now],
+            );
+        }
 
         Ok(())
     }
@@ -215,5 +258,58 @@ impl AchievementDatabase {
         ).map_err(|e| format!("Failed to update achievement status: {}", e))?;
 
         Ok(())
+    }
+
+    // Exclusions management
+    pub fn add_exclusion(&self, app_id: u32, name: String) -> Result<(), String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        self.conn.execute(
+            "INSERT INTO exclusions (app_id, name, added_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(app_id) DO UPDATE SET name = excluded.name",
+            params![app_id, name, now],
+        ).map_err(|e| format!("Failed to add exclusion: {}", e))?;
+
+        Ok(())
+    }
+
+    pub fn remove_exclusion(&self, app_id: u32) -> Result<(), String> {
+        self.conn.execute(
+            "DELETE FROM exclusions WHERE app_id = ?1",
+            [app_id],
+        ).map_err(|e| format!("Failed to remove exclusion: {}", e))?;
+        Ok(())
+    }
+
+    pub fn get_all_exclusions(&self) -> Result<Vec<Exclusion>, String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, app_id, name, added_at FROM exclusions ORDER BY name"
+        ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let exclusions = stmt.query_map([], |row| {
+            Ok(Exclusion {
+                id: row.get(0)?,
+                app_id: row.get(1)?,
+                name: row.get(2)?,
+                added_at: row.get(3)?,
+            })
+        }).map_err(|e| format!("Failed to query exclusions: {}", e))?;
+
+        exclusions.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to collect exclusions: {}", e))
+    }
+
+    pub fn is_excluded(&self, app_id: u32) -> Result<bool, String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COUNT(*) FROM exclusions WHERE app_id = ?1"
+        ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+        let count: i64 = stmt.query_row([app_id], |row| row.get(0))
+            .map_err(|e| format!("Failed to check exclusion: {}", e))?;
+
+        Ok(count > 0)
     }
 }

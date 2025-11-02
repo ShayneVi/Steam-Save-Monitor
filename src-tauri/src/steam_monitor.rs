@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use regex::Regex;
 use sysinfo::System;
 use std::collections::HashMap;
+use crate::achievements::AchievementDatabase;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameInfo {
@@ -22,6 +23,7 @@ pub struct SteamMonitor {
     last_running_appid: Option<u32>,
     system: System,
     game_executables: HashMap<String, (u32, String)>, // exe_name -> (app_id, game_name)
+    db_path: Option<PathBuf>,
 }
 
 impl SteamMonitor {
@@ -35,12 +37,17 @@ impl SteamMonitor {
             last_running_appid: None,
             system: System::new_all(),
             game_executables: HashMap::new(),
+            db_path: None,
         };
 
         // Build game executable map
         monitor.load_steam_games();
 
         Ok(monitor)
+    }
+
+    pub fn set_db_path(&mut self, db_path: PathBuf) {
+        self.db_path = Some(db_path);
     }
 
     fn load_steam_games(&mut self) {
@@ -277,9 +284,15 @@ impl SteamMonitor {
 
             // Check if this process matches any of our known Steam games
             if let Some((app_id, game_name)) = self.game_executables.get(process_name) {
-                // Exclude Borderless Gaming (AppID 388080) from monitoring
-                if *app_id == 388080 {
-                    continue;
+                // Check if this app is excluded (from database if available)
+                if let Some(ref db_path) = self.db_path {
+                    if let Ok(db) = AchievementDatabase::new(db_path.clone()) {
+                        if let Ok(is_excluded) = db.is_excluded(*app_id) {
+                            if is_excluded {
+                                continue;
+                            }
+                        }
+                    }
                 }
 
                 return Some(GameInfo {

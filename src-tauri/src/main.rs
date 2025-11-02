@@ -769,6 +769,71 @@ async fn remove_game_from_tracking(
 }
 
 #[tauri::command]
+async fn get_all_exclusions(state: State<'_, AppState>) -> Result<Vec<achievements::Exclusion>, String> {
+    let db = {
+        let path_guard = state.achievement_db_path.lock().unwrap();
+        match &*path_guard {
+            Some(path) => AchievementDatabase::new(path.clone()).ok(),
+            None => None,
+        }
+    };
+
+    match db {
+        Some(db) => db.get_all_exclusions(),
+        None => Err("Achievement database not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn add_exclusion(
+    app_id: u32,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = {
+        let path_guard = state.achievement_db_path.lock().unwrap();
+        match &*path_guard {
+            Some(path) => AchievementDatabase::new(path.clone()).ok(),
+            None => None,
+        }
+    };
+
+    match db {
+        Some(db) => {
+            db.add_exclusion(app_id, name)?;
+            // No need to restart monitors - they check exclusions dynamically on each scan
+            println!("Added app_id {} to exclusions", app_id);
+            Ok(())
+        }
+        None => Err("Achievement database not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn remove_exclusion(
+    app_id: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = {
+        let path_guard = state.achievement_db_path.lock().unwrap();
+        match &*path_guard {
+            Some(path) => AchievementDatabase::new(path.clone()).ok(),
+            None => None,
+        }
+    };
+
+    match db {
+        Some(db) => {
+            db.remove_exclusion(app_id)?;
+            // No need to restart monitors - they check exclusions dynamically on each scan
+            println!("Removed app_id {} from exclusions", app_id);
+            Ok(())
+        }
+        None => Err("Achievement database not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
 async fn fetch_achievement_icon(url: String) -> Result<String, String> {
     use base64::{Engine as _, engine::general_purpose};
     use std::time::Duration;
@@ -1106,22 +1171,38 @@ async fn handle_game_backup(
 }
 
 async fn start_monitors(state: &AppState, window: Window) {
+    println!("Starting monitors...");
+
+    // Check if monitors are already running
+    {
+        let steam_handle = state.steam_handle.lock().unwrap();
+        if steam_handle.is_some() {
+            println!("WARNING: Steam monitor already running! Skipping start to prevent duplicates.");
+            return;
+        }
+    }
+
     let config = {
         let cfg = state.config.lock().unwrap();
         cfg.get_all()
     };
-    
+
     if config.ludusavi_path.is_empty() || config.backup_path.is_empty() {
         println!("Configuration incomplete, skipping monitor initialization");
         return;
     }
-    
+
     let app_handle = window.app_handle();
     
     // Start Steam monitor (monitors localconfig.vdf file)
     // No API keys or Steamworks required!
     match SteamMonitor::new() {
-        Ok(monitor) => {
+        Ok(mut monitor) => {
+            // Set database path for exclusions checking
+            if let Some(ref db_path) = *state.achievement_db_path.lock().unwrap() {
+                monitor.set_db_path(db_path.clone());
+            }
+
             let (tx, mut rx) = mpsc::channel(10);
             let state_clone = state.clone();
             let app_clone = app_handle.clone();
@@ -1270,26 +1351,39 @@ async fn start_monitors(state: &AppState, window: Window) {
                 }
             }
         });
-        
+
         *state.process_handle.lock().unwrap() = Some(tx);
+        println!("✓ Process monitor started for {} games", config.game_executables.len());
     }
+
+    println!("All monitors started successfully");
 }
 
 async fn stop_monitors(state: &AppState) {
+    println!("Stopping monitors...");
+
+    // Stop all achievement watchers first to prevent duplicate notifications
+    if let Some(ref watcher) = *state.achievement_watcher.lock().unwrap() {
+        watcher.stop_all_watchers();
+    }
+
     // Stop Steam monitor
     let steam_tx = state.steam_handle.lock().unwrap().take();
     if let Some(tx) = steam_tx {
+        println!("Sending stop command to Steam monitor");
         let _ = tx.send(MonitorCommand::Stop).await;
     }
-    
+
     // Stop process monitor
     let process_tx = state.process_handle.lock().unwrap().take();
     if let Some(tx) = process_tx {
+        println!("Sending stop command to process monitor");
         let _ = tx.send(true).await;
     }
-    
-    // Give monitors time to shut down gracefully
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+    // Give monitors more time to shut down gracefully and complete any in-progress operations
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    println!("Monitors stopped");
 }
 
 fn create_tray() -> SystemTray {
@@ -1605,6 +1699,9 @@ fn main() {
             check_game_sources,
             add_game_from_source,
             remove_game_from_tracking,
+            get_all_exclusions,
+            add_exclusion,
+            remove_exclusion,
             fetch_achievement_icon,
             test_overlay,
             test_rarity_notification,

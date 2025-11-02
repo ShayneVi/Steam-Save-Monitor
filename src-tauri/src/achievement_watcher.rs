@@ -84,10 +84,14 @@ impl AchievementWatcher {
 
     /// Find achievement source for a game using the priority: OnlineFix → librarycache → goldberg → steam web api
     pub fn find_achievement_source(&self, app_id: u32, game_name: &str) -> Option<GameAchievementSource> {
-        // Exclude Borderless Gaming (AppID 388080) from achievement monitoring
-        if app_id == 388080 {
-            println!("  ⊘ Skipping Borderless Gaming (AppID 388080) - excluded from monitoring");
-            return None;
+        // Check if this app is excluded (from database)
+        if let Ok(db) = AchievementDatabase::new(self.db_path.clone()) {
+            if let Ok(is_excluded) = db.is_excluded(app_id) {
+                if is_excluded {
+                    println!("  ⊘ Skipping {} (AppID {}) - excluded from monitoring", game_name, app_id);
+                    return None;
+                }
+            }
         }
 
         // Priority 1: OnlineFix
@@ -327,6 +331,26 @@ impl AchievementWatcher {
         // Remove from pending games
         let mut pending = self.pending_games.lock().unwrap();
         pending.remove(&app_id);
+    }
+
+    /// Stop watching all games (used when restarting monitors)
+    pub fn stop_all_watchers(&self) {
+        println!("Stopping all achievement watchers...");
+
+        // Clear all watchers
+        let mut watchers = self.watchers.lock().unwrap();
+        let count = watchers.len();
+        watchers.clear();
+
+        // Clear watched games
+        let mut watched = self.watched_games.lock().unwrap();
+        watched.clear();
+
+        // Clear pending games
+        let mut pending = self.pending_games.lock().unwrap();
+        pending.clear();
+
+        println!("  ✓ Stopped {} achievement watcher(s)", count);
     }
 
     /// Set up file watcher for an achievement source
