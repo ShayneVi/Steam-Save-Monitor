@@ -35,10 +35,11 @@ struct AppState {
     config: Arc<Mutex<ConfigManager>>,
     steam_handle: Arc<Mutex<Option<mpsc::Sender<MonitorCommand>>>>,
     process_handle: Arc<Mutex<Option<mpsc::Sender<bool>>>>,
-    notification_manager: Arc<NotificationManager>,
+    notification_manager: Arc<Mutex<NotificationManager>>,
     achievement_db_path: Arc<Mutex<Option<PathBuf>>>,
     achievement_watcher: Arc<Mutex<Option<Arc<AchievementWatcher>>>>,
     overlay_manager: Arc<Mutex<OverlayManager>>,
+    achievement_duration: Arc<Mutex<u32>>, // Duration in seconds
 }
 
 enum MonitorCommand {
@@ -951,7 +952,7 @@ fn read_audio_file(file_path: String) -> Result<Vec<u8>, String> {
 #[tauri::command]
 async fn test_overlay(state: State<'_, AppState>) -> Result<(), String> {
     // Use NotificationManager to show achievement on overlay
-    state.notification_manager.show_achievement_unlock(
+    state.notification_manager.lock().unwrap().show_achievement_unlock(
         "Test Game",
         "First Steps",
         "Complete the tutorial",
@@ -963,19 +964,45 @@ async fn test_overlay(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn get_achievement_duration(state: State<'_, AppState>) -> Result<u32, String> {
+    let duration = *state.achievement_duration.lock().unwrap();
+    Ok(duration)
+}
+
+#[tauri::command]
+async fn set_achievement_duration(duration: u32, state: State<'_, AppState>) -> Result<(), String> {
+    *state.achievement_duration.lock().unwrap() = duration;
+    println!("[Backend] Achievement duration set to {} seconds", duration);
+    Ok(())
+}
+
+#[tauri::command]
+async fn sync_settings_to_overlay(achievement_settings: serde_json::Value, rarity_settings: serde_json::Value, app: tauri::AppHandle) -> Result<(), String> {
+    // Emit settings to ALL windows (including overlay)
+    app.emit_all("achievement-settings-sync", &achievement_settings)
+        .map_err(|e| format!("Failed to emit achievement settings: {}", e))?;
+
+    app.emit_all("rarity-settings-sync", &rarity_settings)
+        .map_err(|e| format!("Failed to emit rarity settings: {}", e))?;
+
+    println!("[Backend] Settings synced to all windows");
+    Ok(())
+}
+
+#[tauri::command]
 async fn test_rarity_notification(rarity: String, state: State<'_, AppState>) -> Result<(), String> {
     // Map rarity percentage for testing
     let (name, description, percentage) = match rarity.as_str() {
-        "Common" => ("Common Achievement", "90%+ of players have this", 95.0),
-        "Uncommon" => ("Uncommon Achievement", "60-89% of players have this", 75.0),
-        "Rare" => ("Rare Achievement", "35-59% of players have this", 45.0),
-        "Ultra Rare" => ("Ultra Rare Achievement", "15-34% of players have this", 20.0),
-        "Legendary" => ("Legendary Achievement", "0-14% of players have this", 5.0),
+        "Common" => ("Common Achievement", "30%+ of players have this", 35.0),
+        "Uncommon" => ("Uncommon Achievement", "20-29% of players have this", 25.0),
+        "Rare" => ("Rare Achievement", "13-19% of players have this", 15.0),
+        "Ultra Rare" => ("Ultra Rare Achievement", "5-12% of players have this", 8.0),
+        "Legendary" => ("Legendary Achievement", "0-4% of players have this", 2.0),
         _ => ("Test Achievement", "Unknown rarity", 50.0),
     };
 
     // Use NotificationManager to show achievement on overlay with rarity percentage
-    state.notification_manager.show_achievement_unlock(
+    state.notification_manager.lock().unwrap().show_achievement_unlock(
         "Test Game",
         name,
         description,
@@ -1047,7 +1074,7 @@ async fn handle_game_backup(
         Ok(result) => {
             if result.success {
                 if notifications_enabled {
-                    state.notification_manager.show_backup_success(
+                    state.notification_manager.lock().unwrap().show_backup_success(
                         &game_name,
                         result.files_backed_up.unwrap_or(0),
                         &result.total_size.unwrap_or_default(),
@@ -1055,14 +1082,14 @@ async fn handle_game_backup(
                 }
             } else if result.not_found.unwrap_or(false) {
                 if notifications_enabled {
-                    state.notification_manager.show_game_not_found(&game_name);
+                    state.notification_manager.lock().unwrap().show_game_not_found(&game_name);
                 }
-                
+
                 // Send to frontend
                 let _ = app_handle.emit_all("game-not-found", serde_json::json!({ "name": game_name }));
             } else {
                 if notifications_enabled {
-                    state.notification_manager.show_backup_failed(
+                    state.notification_manager.lock().unwrap().show_backup_failed(
                         &game_name,
                         &result.error.unwrap_or_else(|| "Unknown error".to_string()),
                     );
@@ -1072,7 +1099,7 @@ async fn handle_game_backup(
         Err(e) => {
             eprintln!("Backup error: {}", e);
             if notifications_enabled {
-                state.notification_manager.show_error("Backup Error", &format!("Error backing up {}", game_name));
+                state.notification_manager.lock().unwrap().show_error("Backup Error", &format!("Error backing up {}", game_name));
             }
         }
     }
@@ -1157,7 +1184,7 @@ async fn start_monitors(state: &AppState, window: Window) {
                                             };
 
                                             if notifications_enabled {
-                                                state_clone.notification_manager.show_game_detected(&game.name);
+                                                state_clone.notification_manager.lock().unwrap().show_game_detected(&game.name);
                                             }
                                         }
                                     }
@@ -1208,7 +1235,7 @@ async fn start_monitors(state: &AppState, window: Window) {
                                     }
                                     
                                     if notifications {
-                                        state_clone.notification_manager.show_game_detected(&game.name);
+                                        state_clone.notification_manager.lock().unwrap().show_game_detected(&game.name);
                                     }
                                     
                                     let _ = app_clone.emit_all("game-detected", &game.name);
@@ -1228,7 +1255,7 @@ async fn start_monitors(state: &AppState, window: Window) {
                                     }
                                     
                                     if notifications {
-                                        state_clone.notification_manager.show_game_ended(&game.name);
+                                        state_clone.notification_manager.lock().unwrap().show_game_ended(&game.name);
                                     }
                                     
                                     handle_game_backup(game.name, &state_clone, app_clone.clone()).await;
@@ -1277,21 +1304,105 @@ fn create_tray() -> SystemTray {
 }
 
 fn main() {
+    // Set up panic hook to write to file and show message box
+    std::panic::set_hook(Box::new(|panic_info| {
+        let panic_msg = format!("PANIC: {:?}", panic_info);
+        eprintln!("{}", panic_msg);
+
+        // Write to log file in Documents folder
+        if let Some(docs) = dirs::document_dir() {
+            let log_path = docs.join("Steam Backup Manager Crash.log");
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S");
+            let log_msg = format!("[{}] {}\n", timestamp, panic_msg);
+            let _ = std::fs::write(&log_path, log_msg);
+
+            // Show message box
+            #[cfg(windows)]
+            {
+                use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OK, MB_ICONERROR};
+                use windows::core::PCWSTR;
+                unsafe {
+                    let title: Vec<u16> = "Steam Backup Manager Crash"
+                        .encode_utf16()
+                        .chain(std::iter::once(0))
+                        .collect();
+                    let msg: Vec<u16> = format!("App crashed! Error log saved to:\n{}\n\nError: {}",
+                        log_path.display(), panic_msg)
+                        .encode_utf16()
+                        .chain(std::iter::once(0))
+                        .collect();
+                    MessageBoxW(None, PCWSTR(msg.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONERROR);
+                }
+            }
+        }
+    }));
+
+    // Also set up file logging for regular messages
+    if let Some(docs) = dirs::document_dir() {
+        let log_path = docs.join("Steam Backup Manager Debug.log");
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S");
+        let _ = std::fs::write(&log_path, format!("[{}] App starting...\n", timestamp));
+        println!("Logging to: {}", log_path.display());
+    }
+
     tauri::Builder::default()
         .setup(|app| {
+            // CRITICAL: Register state IMMEDIATELY with minimal setup
+            // This prevents race conditions where frontend tries to access state before it's ready
             let config = Arc::new(Mutex::new(ConfigManager::new()));
 
-            // Initialize overlay manager first
-            let overlay_manager = Arc::new(Mutex::new(OverlayManager::new()));
+            // Create state with MINIMAL initialization - don't initialize anything yet!
+            let achievement_duration = Arc::new(Mutex::new(6)); // Default 6 seconds
+
+            let state = AppState {
+                config: config.clone(),
+                steam_handle: Arc::new(Mutex::new(None)),
+                process_handle: Arc::new(Mutex::new(None)),
+                notification_manager: Arc::new(Mutex::new(NotificationManager::new(achievement_duration.clone()))),
+                achievement_db_path: Arc::new(Mutex::new(None)),
+                achievement_watcher: Arc::new(Mutex::new(None)),
+                overlay_manager: Arc::new(Mutex::new(OverlayManager::new())),
+                achievement_duration,
+            };
+
+            // Register state FIRST - before doing ANYTHING else
+            app.manage(state.clone());
+            println!("✓ State registered with Tauri (frontend can now access it safely)");
+
+            // NOW create and show the main window - state is registered so frontend can safely call commands
+            let main_window = tauri::WindowBuilder::new(
+                app,
+                "main",
+                tauri::WindowUrl::App("index.html".into())
+            )
+            .title("Steam Backup Manager")
+            .inner_size(1100.0, 800.0)
+            .resizable(true)
+            .center()
+            .build()
+            .map_err(|e| format!("Failed to create main window: {}", e))?;
+            println!("✓ Main window created and shown");
+
+            // Now it's safe to initialize components
+            // Initialize overlay manager
             {
-                let mut overlay = overlay_manager.lock().unwrap();
+                let mut overlay = state.overlay_manager.lock().unwrap();
                 if let Err(e) = overlay.init(&app.app_handle()) {
                     eprintln!("Failed to initialize overlay: {}", e);
+                } else {
+                    println!("✓ Overlay initialized");
                 }
             }
 
+            // Set overlay in notification manager
+            {
+                let mut notif = state.notification_manager.lock().unwrap();
+                notif.set_overlay_manager(state.overlay_manager.clone());
+                println!("✓ Notification manager configured");
+            }
+
             // Listen for overlay-notifications-done event to auto-hide overlay
-            let overlay_manager_for_listener = overlay_manager.clone();
+            let overlay_manager_for_listener = state.overlay_manager.clone();
             if let Some(overlay_window) = app.get_window("overlay") {
                 overlay_window.listen("overlay-notifications-done", move |_event| {
                     println!("[Overlay] Received notifications-done event, hiding overlay");
@@ -1299,14 +1410,61 @@ fn main() {
                         let _ = overlay.hide_overlay();
                     }
                 });
-            }
 
-            // Initialize notification manager and set overlay
-            let notification_manager = Arc::new({
-                let mut mgr = NotificationManager::new();
-                mgr.set_overlay_manager(overlay_manager.clone());
-                mgr
-            });
+                // IMPORTANT: Send initial settings to overlay window
+                // This ensures the overlay has the correct settings even in production builds
+                // where localStorage is NOT shared between windows
+                println!("[Overlay] Sending initial settings to overlay window");
+
+                // Send achievement settings (duration)
+                let achievement_settings = serde_json::json!({ "duration": 6 }); // Default value
+                if let Err(e) = overlay_window.emit("achievement-settings-sync", &achievement_settings) {
+                    eprintln!("Failed to emit initial achievement settings: {}", e);
+                }
+
+                // Send rarity settings
+                let rarity_settings = serde_json::json!({
+                    "enabled": false,
+                    "Common": {
+                        "backgroundColor": "#1f2937",
+                        "borderColor": "#6b7280",
+                        "textColor": "#ffffff",
+                        "soundPath": null,
+                        "customFont": null
+                    },
+                    "Uncommon": {
+                        "backgroundColor": "#14532d",
+                        "borderColor": "#16a34a",
+                        "textColor": "#ffffff",
+                        "soundPath": null,
+                        "customFont": null
+                    },
+                    "Rare": {
+                        "backgroundColor": "#1e3a8a",
+                        "borderColor": "#3b82f6",
+                        "textColor": "#ffffff",
+                        "soundPath": null,
+                        "customFont": null
+                    },
+                    "Ultra Rare": {
+                        "backgroundColor": "#581c87",
+                        "borderColor": "#a855f7",
+                        "textColor": "#ffffff",
+                        "soundPath": null,
+                        "customFont": null
+                    },
+                    "Legendary": {
+                        "backgroundColor": "#78350f",
+                        "borderColor": "#f59e0b",
+                        "textColor": "#ffffff",
+                        "soundPath": null,
+                        "customFont": null
+                    }
+                });
+                if let Err(e) = overlay_window.emit("rarity-settings-sync", &rarity_settings) {
+                    eprintln!("Failed to emit initial rarity settings: {}", e);
+                }
+            }
 
             // Initialize achievement database
             let db_path = app.path_resolver()
@@ -1331,6 +1489,9 @@ fn main() {
                 }
             };
 
+            // Update state with database path
+            *state.achievement_db_path.lock().unwrap() = achievement_db_path_option.clone();
+
             // Initialize achievement watcher
             let steam_path = PathBuf::from(r"C:\Program Files (x86)\Steam");
             let steam_user_id_for_watcher = {
@@ -1339,7 +1500,18 @@ fn main() {
                 cfg.steam_user_id
             };
             let achievement_watcher_option = achievement_db_path_option.as_ref().map(|_| {
-                let mut watcher = AchievementWatcher::new(db_path.clone(), steam_path.clone(), steam_user_id_for_watcher, notification_manager.clone());
+                // Create steam client for the watcher
+                let (api_key, steam_id_64) = {
+                    let config_guard = config.lock().unwrap();
+                    let cfg = config_guard.get_all();
+                    (cfg.steam_api_key, cfg.steam_id_64)
+                };
+                let steam_client = Arc::new(
+                    SteamAchievementClient::new(api_key, steam_id_64)
+                        .expect("Failed to create steam client for achievement watcher")
+                );
+
+                let mut watcher = AchievementWatcher::new(db_path.clone(), steam_path.clone(), steam_user_id_for_watcher, state.notification_manager.clone(), steam_client);
 
                 // Create channel for achievement unlock events
                 let (unlock_tx, unlock_rx) = channel::<AchievementUnlockEvent>();
@@ -1357,23 +1529,14 @@ fn main() {
                 Arc::new(watcher)
             });
 
-            let state = AppState {
-                config: config.clone(),
-                steam_handle: Arc::new(Mutex::new(None)),
-                process_handle: Arc::new(Mutex::new(None)),
-                notification_manager,
-                achievement_db_path: Arc::new(Mutex::new(achievement_db_path_option)),
-                achievement_watcher: Arc::new(Mutex::new(achievement_watcher_option)),
-                overlay_manager,
-            };
-
-            app.manage(state.clone());
+            // Update state with achievement watcher
+            *state.achievement_watcher.lock().unwrap() = achievement_watcher_option;
 
             // Initialize monitors
-            let window = app.get_window("main").unwrap();
             let state_clone = state.clone();
+            let window_clone = main_window.clone();
             tauri::async_runtime::spawn(async move {
-                start_monitors(&state_clone, window).await;
+                start_monitors(&state_clone, window_clone).await;
             });
 
             // Start periodic checking for pending games (every 10 minutes)
@@ -1445,6 +1608,9 @@ fn main() {
             fetch_achievement_icon,
             test_overlay,
             test_rarity_notification,
+            sync_settings_to_overlay,
+            get_achievement_duration,
+            set_achievement_duration,
             play_windows_notification_sound,
             debug_log,
             read_audio_file,

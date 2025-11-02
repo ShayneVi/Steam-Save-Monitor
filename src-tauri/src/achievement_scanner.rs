@@ -126,6 +126,12 @@ impl AchievementScanner {
 
         println!("  ✓ Retrieved {} achievements from Steam API", steam_schema.len());
 
+        // Get global achievement percentages
+        let global_percentages = steam_client.get_global_achievement_percentages(app_id).await.ok();
+        if global_percentages.is_some() {
+            println!("  ✓ Retrieved global achievement percentages");
+        }
+
         // STEP 2: Read library cache to see which ones are unlocked
         let contents = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read librarycache file: {}", e))?;
@@ -209,6 +215,11 @@ impl AchievementScanner {
                     .copied()
                     .unwrap_or((false, None));
 
+                // Get global unlock percentage for this achievement
+                let global_percentage = global_percentages.as_ref()
+                    .and_then(|percentages| percentages.get(&ach_schema.name))
+                    .copied();
+
                 let achievement = Achievement {
                     id: None,
                     app_id,
@@ -223,7 +234,7 @@ impl AchievementScanner {
                     unlock_time,
                     source: "Steamtools".to_string(),
                     last_updated: now,
-                    global_unlock_percentage: None,
+                    global_unlock_percentage: global_percentage,
                 };
 
                 db.insert_or_update_achievement(&achievement)?;
@@ -363,6 +374,12 @@ impl AchievementScanner {
 
         println!("  ✓ Retrieved {} achievements from Steam API", steam_schema.len());
 
+        // Get global achievement percentages
+        let global_percentages = steam_client.get_global_achievement_percentages(app_id).await.ok();
+        if global_percentages.is_some() {
+            println!("  ✓ Retrieved global achievement percentages");
+        }
+
         let contents = fs::read_to_string(&path)
             .map_err(|e| format!("Failed to read Goldberg achievements: {}", e))?;
 
@@ -395,6 +412,11 @@ impl AchievementScanner {
                     .map(|(name, desc)| (name.clone(), desc.clone()))
                     .unwrap_or_else(|| (ach_id.clone(), String::new()));
 
+                // Get global unlock percentage for this achievement
+                let global_percentage = global_percentages.as_ref()
+                    .and_then(|percentages| percentages.get(&ach_id))
+                    .copied();
+
                 let achievement = Achievement {
                     id: None,
                     app_id,
@@ -409,7 +431,7 @@ impl AchievementScanner {
                     unlock_time: earned_time,
                     source: "Goldberg".to_string(),
                     last_updated: now,
-                    global_unlock_percentage: None,
+                    global_unlock_percentage: global_percentage,
                 };
 
                 db.insert_or_update_achievement(&achievement)?;
@@ -519,6 +541,12 @@ impl AchievementScanner {
         }).collect();
 
         println!("  ✓ Retrieved {} achievements from Steam API", steam_achievements.len());
+
+        // Get global achievement percentages
+        let global_percentages = steam_client.get_global_achievement_percentages(app_id).await.ok();
+        if global_percentages.is_some() {
+            println!("  ✓ Retrieved global achievement percentages");
+        }
 
         let contents = fs::read_to_string(&onlinefix_path)
             .map_err(|e| format!("Failed to read Online-fix INI: {}", e))?;
@@ -840,15 +868,20 @@ impl AchievementScanner {
 
             // Now insert ALL achievements from Steam Community
             let mut unlocked_count = 0;
-            for (index, (_api_name, display_name, description)) in steam_achievements.iter().enumerate() {
+            for (index, (api_name, display_name, description)) in steam_achievements.iter().enumerate() {
                 let is_unlocked = unlocked_achievements.contains_key(&index);
                 let unlock_time = unlocked_achievements.get(&index).copied().filter(|&t| t > 0);
+
+                // Get global unlock percentage for this achievement
+                let global_percentage = global_percentages.as_ref()
+                    .and_then(|percentages| percentages.get(api_name))
+                    .copied();
 
                 let achievement = Achievement {
                     id: None,
                     app_id,
                     game_name: game_name.clone(),
-                    achievement_id: format!("ach_{}", index),  // Generate a consistent ID
+                    achievement_id: api_name.clone(),  // Use actual Steam API name, not generated ID
                     display_name: display_name.clone(),
                     description: description.clone(),
                     icon_url: None,
@@ -858,7 +891,7 @@ impl AchievementScanner {
                     unlock_time,
                     source: "Online-fix".to_string(),
                     last_updated: now,
-                    global_unlock_percentage: None,
+                    global_unlock_percentage: global_percentage,
                 };
 
                 db.insert_or_update_achievement(&achievement)?;

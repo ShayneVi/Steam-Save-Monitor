@@ -8,12 +8,14 @@ use std::sync::{Arc, Mutex};
 
 pub struct NotificationManager {
     overlay_manager: Option<Arc<Mutex<OverlayManager>>>,
+    achievement_duration: Arc<Mutex<u32>>,
 }
 
 impl NotificationManager {
-    pub fn new() -> Self {
+    pub fn new(achievement_duration: Arc<Mutex<u32>>) -> Self {
         Self {
             overlay_manager: None,
+            achievement_duration,
         }
     }
 
@@ -88,6 +90,9 @@ impl NotificationManager {
     }
 
     pub fn show_achievement_unlock(&self, game_name: &str, achievement_name: &str, description: &str, icon_url: Option<&str>, global_unlock_percentage: Option<f32>) {
+        // Get current duration from state
+        let duration_seconds = *self.achievement_duration.lock().unwrap();
+
         // Try to use overlay if available
         if let Some(overlay_manager) = &self.overlay_manager {
             if let Ok(overlay) = overlay_manager.lock() {
@@ -96,8 +101,11 @@ impl NotificationManager {
                     "achievement_name": achievement_name,
                     "achievement_description": description,
                     "icon_url": icon_url,
-                    "global_unlock_percentage": global_unlock_percentage
+                    "global_unlock_percentage": global_unlock_percentage,
+                    "duration_seconds": duration_seconds
                 });
+
+                println!("[NotificationManager] Sending notification with duration: {} seconds", duration_seconds);
 
                 // Try to show on overlay
                 if overlay.show_overlay("achievement", notification_data).is_ok() {

@@ -222,7 +222,7 @@ impl SteamAchievementClient {
     }
 
     /// Get global achievement percentages from Steam Web API
-    async fn get_global_achievement_percentages(&self, app_id: u32) -> Result<std::collections::HashMap<String, f32>, String> {
+    pub async fn get_global_achievement_percentages(&self, app_id: u32) -> Result<std::collections::HashMap<String, f32>, String> {
         let url = format!(
             "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={}",
             app_id
@@ -235,6 +235,11 @@ impl SteamAchievementClient {
             .send()
             .await
             .map_err(|e| format!("Failed to fetch global percentages: {}", e))?;
+
+        // Check if the request was successful
+        if !response.status().is_success() {
+            return Err(format!("Steam API returned error: {} for app_id {}", response.status(), app_id));
+        }
 
         #[derive(Debug, Deserialize)]
         struct GlobalPercentagesResponse {
@@ -249,7 +254,7 @@ impl SteamAchievementClient {
         #[derive(Debug, Deserialize)]
         struct GlobalAchievementPercentage {
             name: String,
-            percent: f32,
+            percent: String,  // Steam API returns percentage as a string, not a number
         }
 
         let percentages_response: GlobalPercentagesResponse = response
@@ -262,7 +267,12 @@ impl SteamAchievementClient {
         if let Some(data) = percentages_response.achievementpercentages {
             if let Some(achievements) = data.achievements {
                 for ach in achievements {
-                    result.insert(ach.name, ach.percent);
+                    // Parse the string percentage to f32
+                    if let Ok(percent_value) = ach.percent.parse::<f32>() {
+                        result.insert(ach.name, percent_value);
+                    } else {
+                        println!("  ⚠ Failed to parse percentage for achievement: {} (value: {})", ach.name, ach.percent);
+                    }
                 }
                 println!("  ✓ Loaded global percentages for {} achievements", result.len());
             }

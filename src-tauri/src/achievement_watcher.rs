@@ -9,6 +9,7 @@ use crate::achievements::{Achievement, AchievementDatabase};
 use crate::achievement_scanner::AchievementScanner;
 use crate::steam_achievements::SteamAchievementClient;
 use crate::notifications::NotificationManager;
+use std::collections::HashMap as StdHashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AchievementUnlockEvent {
@@ -58,11 +59,12 @@ pub struct AchievementWatcher {
     steam_path: PathBuf,
     steam_user_id: Option<String>,
     event_sender: Option<Sender<AchievementUnlockEvent>>,
-    notification_manager: Arc<NotificationManager>,
+    notification_manager: Arc<Mutex<NotificationManager>>,
+    steam_client: Arc<SteamAchievementClient>,
 }
 
 impl AchievementWatcher {
-    pub fn new(db_path: PathBuf, steam_path: PathBuf, steam_user_id: Option<String>, notification_manager: Arc<NotificationManager>) -> Self {
+    pub fn new(db_path: PathBuf, steam_path: PathBuf, steam_user_id: Option<String>, notification_manager: Arc<Mutex<NotificationManager>>, steam_client: Arc<SteamAchievementClient>) -> Self {
         Self {
             watchers: Arc::new(Mutex::new(HashMap::new())),
             watched_games: Arc::new(Mutex::new(HashMap::new())),
@@ -72,6 +74,7 @@ impl AchievementWatcher {
             steam_user_id,
             event_sender: None,
             notification_manager,
+            steam_client,
         }
     }
 
@@ -274,7 +277,7 @@ impl AchievementWatcher {
                     // Find the file for this specific source
                     if let Some(source) = self.find_specific_source(app_id, &game_name, db_source) {
                         println!("  ✓ Will monitor {} for achievements", db_source);
-                        self.setup_file_watcher(source.clone()).await;
+                        self.setup_file_watcher(source.clone(), self.steam_client.clone()).await;
 
                         // Store in watched games
                         {
@@ -292,7 +295,7 @@ impl AchievementWatcher {
         // FALLBACK: If not in database, use priority search
         if let Some(source) = self.find_achievement_source(app_id, &game_name) {
             // Found a source, set up file watcher
-            self.setup_file_watcher(source.clone()).await;
+            self.setup_file_watcher(source.clone(), self.steam_client.clone()).await;
 
             // Store in watched games
             {
@@ -327,7 +330,7 @@ impl AchievementWatcher {
     }
 
     /// Set up file watcher for an achievement source
-    async fn setup_file_watcher(&self, source: GameAchievementSource) {
+    async fn setup_file_watcher(&self, source: GameAchievementSource, steam_client: Arc<SteamAchievementClient>) {
         let app_id = source.app_id;
         let file_path = source.file_path.clone();
         let db_path = self.db_path.clone();
@@ -390,6 +393,7 @@ impl AchievementWatcher {
                                 &steam_path,
                                 event_sender.clone(),
                                 notification_manager.clone(),
+                                steam_client.clone(),
                             ).await {
                                 println!("  ✗ Error checking for unlocks: {}", e);
                             }
@@ -410,7 +414,8 @@ impl AchievementWatcher {
         db_path: &PathBuf,
         steam_path: &PathBuf,
         event_sender: Option<Sender<AchievementUnlockEvent>>,
-        notification_manager: Arc<NotificationManager>,
+        notification_manager: Arc<Mutex<NotificationManager>>,
+        steam_client: Arc<SteamAchievementClient>,
     ) -> Result<(), String> {
         // Get current achievements from database
         let db = AchievementDatabase::new(db_path.clone())?;
@@ -439,25 +444,59 @@ impl AchievementWatcher {
             }
         };
 
+        // Fetch global percentages for all achievements in this game (once per unlock detection)
+        println!("  📊 Fetching global achievement percentages from Steam API for app_id {}...", app_id);
+        let global_percentages = match steam_client.get_global_achievement_percentages(app_id).await {
+            Ok(percentages) => {
+                println!("  ✓ Retrieved global achievement percentages for {} achievements", percentages.len());
+                println!("  DEBUG: Available achievement IDs: {:?}", percentages.keys().take(10).collect::<Vec<_>>());
+                Some(percentages)
+            }
+            Err(e) => {
+                println!("  ❌ ERROR fetching global percentages: {}", e);
+                None
+            }
+        };
+
         // Update database and emit events for newly unlocked achievements
         for (achievement_id, unlock_time) in unlocked_achievements {
             if let Some(db_ach) = db_map.get(&achievement_id) {
                 if !db_ach.achieved {
                     // Achievement was just unlocked!
                     println!("  🏆 Achievement unlocked: {} - {}", game_name, db_ach.display_name);
+                    println!("  DEBUG: Looking up percentage for achievement_id: '{}'", achievement_id);
 
-                    // Update database
-                    if let Some(id) = db_ach.id {
-                        db.update_achievement_status(id, true, Some(unlock_time))?;
+                    // Get global unlock percentage for this specific achievement
+                    let global_percentage = global_percentages.as_ref()
+                        .and_then(|percentages| percentages.get(&achievement_id))
+                        .copied();
+
+                    if let Some(pct) = global_percentage {
+                        println!("  ✅ Global unlock rate: {:.1}%", pct);
+                    } else {
+                        println!("  ❌ No percentage found for achievement_id: '{}'", achievement_id);
                     }
 
-                    // Show overlay notification (or Windows native as fallback)
-                    notification_manager.show_achievement_unlock(
+                    // Update database with achieved status AND global percentage
+                    if let Some(id) = db_ach.id {
+                        db.update_achievement_status(id, true, Some(unlock_time))?;
+
+                        // Also update the global percentage if we fetched it
+                        if global_percentage.is_some() && db_ach.global_unlock_percentage.is_none() {
+                            // Re-fetch the achievement to update its global percentage
+                            let mut updated_ach = db_ach.clone();
+                            updated_ach.global_unlock_percentage = global_percentage;
+                            db.insert_or_update_achievement(&updated_ach)?;
+                        }
+                    }
+
+                    // Show overlay notification (or Windows native as fallback) with the fetched percentage
+                    notification_manager.lock().unwrap().show_achievement_unlock(
                         game_name,
                         &db_ach.display_name,
                         &db_ach.description,
                         db_ach.icon_url.as_deref(),
-                        db_ach.global_unlock_percentage
+                        global_percentage.or(db_ach.global_unlock_percentage)
                     );
 
                     // Emit event for in-app toast notification
@@ -471,7 +510,7 @@ impl AchievementWatcher {
                             icon_url: db_ach.icon_url.clone(),
                             unlock_time,
                             source: source_type.to_string(),
-                            global_unlock_percentage: db_ach.global_unlock_percentage,
+                            global_unlock_percentage: global_percentage.or(db_ach.global_unlock_percentage),
                         };
                         let _ = sender.send(event);
                     }
@@ -679,7 +718,7 @@ impl AchievementWatcher {
             if let Some(source) = self.find_achievement_source(app_id, &game_name) {
                 // Found a source!
                 println!("  ✓ Found source for {}!", game_name);
-                self.setup_file_watcher(source.clone()).await;
+                self.setup_file_watcher(source.clone(), self.steam_client.clone()).await;
 
                 // Move from pending to watched
                 {
