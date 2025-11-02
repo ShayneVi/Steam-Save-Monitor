@@ -154,11 +154,11 @@ Achievements are categorized by global unlock percentage:
 
 | Rarity | Unlock Rate | Default Color |
 |--------|-------------|---------------|
-| **Common** | 90%+ | Gray |
-| **Uncommon** | 60-89% | Green |
-| **Rare** | 35-59% | Blue |
-| **Ultra Rare** | 15-34% | Purple |
-| **Legendary** | 0-14% | Gold |
+| **Common** | 30%+ | Gray |
+| **Uncommon** | 20-29% | Green |
+| **Rare** | 13-19% | Blue |
+| **Ultra Rare** | 5-12% | Purple |
+| **Legendary** | 0-4% | Gold |
 
 ### Per-Rarity Customization
 

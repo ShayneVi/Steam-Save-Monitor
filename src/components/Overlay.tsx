@@ -16,6 +16,7 @@ interface NotificationData {
   total_size?: string;
   error?: string;
   global_unlock_percentage?: number;
+  duration_seconds?: number;
 }
 
 interface OverlayNotification extends NotificationData {
@@ -30,18 +31,6 @@ function Overlay() {
   const notificationIdCounter = useRef(0);
   const queueRef = useRef<NotificationData[]>([]);
   const processingRef = useRef(false);
-  const [achievementDuration, setAchievementDuration] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('achievementSettings');
-      if (saved) {
-        const settings = JSON.parse(saved);
-        return settings.duration || 6;
-      }
-    } catch {
-      return 6;
-    }
-    return 6;
-  });
 
   const [raritySettings, setRaritySettings] = useState<RaritySettings>(defaultRaritySettings);
   const raritySettingsRef = useRef<RaritySettings>(defaultRaritySettings);
@@ -93,7 +82,7 @@ function Overlay() {
       const [notificationType, data] = event.payload;
       console.log('[Overlay] Received notification:', notificationType, data);
 
-      // Add to queue
+      // Add to queue (duration is now included in notification data)
       queueRef.current.push({
         type: notificationType,
         ...data,
@@ -122,30 +111,9 @@ function Overlay() {
       localStorage.setItem('raritySettings', JSON.stringify(settings));
     });
 
-    // Listen for settings updates from localStorage
-    const handleStorageChange = () => {
-      try {
-        const saved = localStorage.getItem('achievementSettings');
-        if (saved) {
-          const settings = JSON.parse(saved);
-          setAchievementDuration(settings.duration || 6);
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    };
-
-    // Listen for storage events (from other windows/tabs)
-    window.addEventListener('storage', handleStorageChange);
-
-    // Listen for custom event (from same window)
-    window.addEventListener('achievement-settings-updated', handleStorageChange as EventListener);
-
     return () => {
       unlistenNotification.then(fn => fn());
       unlistenRaritySync.then(fn => fn());
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('achievement-settings-updated', handleStorageChange as EventListener);
     };
   }, []);
 
@@ -375,8 +343,10 @@ function Overlay() {
       );
     }, 50);
 
-    // Remove notification after duration (customizable for achievements, 3 for others)
-    const duration = notificationData.type === 'achievement' ? achievementDuration * 1000 : 3000;
+    // Remove notification after duration (use duration from notification payload, default to 6 seconds for achievements)
+    const duration = notificationData.type === 'achievement'
+      ? (notificationData.duration_seconds || 6) * 1000
+      : 3000;
     setTimeout(() => {
       // Trigger exit animation
       setNotifications(prev =>
@@ -412,7 +382,7 @@ function Overlay() {
   return (
     <div className="fixed inset-0 pointer-events-none">
       {notifications.map(notification => (
-        <OverlayNotificationCard key={notification.id} notification={notification} duration={achievementDuration} raritySettings={raritySettings} />
+        <OverlayNotificationCard key={notification.id} notification={notification} duration={notification.duration_seconds || 6} raritySettings={raritySettings} />
       ))}
     </div>
   );
@@ -541,6 +511,17 @@ function AchievementNotification({
   customFontFamily?: string;
   customIconUrl?: string;
 }) {
+  const [progressWidth, setProgressWidth] = useState(0);
+
+  useEffect(() => {
+    // Start progress animation after component mounts
+    const timer = setTimeout(() => {
+      setProgressWidth(100);
+    }, 50);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   // Calculate rarity if enabled
   const rarity = calculateRarity(globalUnlockPercentage);
   const isRarityEnabled = raritySettings.enabled;
@@ -658,16 +639,11 @@ function AchievementNotification({
           className="h-full rounded-full"
           style={{
             background: `linear-gradient(90deg, ${borderColor} 0%, ${borderColor}CC 100%)`,
-            animation: `progress ${duration}s linear forwards`
+            width: `${progressWidth}%`,
+            transition: `width ${duration}s linear`
           }}
         ></div>
       </div>
-      <style>{`
-        @keyframes progress {
-          0% { width: 0%; }
-          100% { width: 100%; }
-        }
-      `}</style>
     </div>
   );
 }

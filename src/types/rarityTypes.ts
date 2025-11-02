@@ -115,11 +115,11 @@ export function calculateRarity(percentage: number | null | undefined): RarityTi
     return 'Common'; // Default for achievements without percentage data
   }
 
-  if (percentage >= 90) return 'Common';
-  if (percentage >= 60) return 'Uncommon';
-  if (percentage >= 35) return 'Rare';
-  if (percentage >= 15) return 'Ultra Rare';
-  return 'Legendary';
+  if (percentage >= 30) return 'Common';       // 30%+
+  if (percentage >= 20) return 'Uncommon';     // 20-29%
+  if (percentage >= 13) return 'Rare';         // 13-19%
+  if (percentage >= 5) return 'Ultra Rare';    // 5-12%
+  return 'Legendary';                           // 0-4%
 }
 
 /**

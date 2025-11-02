@@ -113,17 +113,7 @@ function App() {
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Achievement customization settings
-  const [achievementSettings, setAchievementSettings] = useState<AchievementSettings>(() => {
-    const saved = localStorage.getItem('achievementSettings');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return { duration: 6 };
-      }
-    }
-    return { duration: 6 }; // Default 6 seconds
-  });
+  const [achievementSettings, setAchievementSettings] = useState<AchievementSettings>({ duration: 6 });
 
   // Rarity settings
   const [raritySettings, setRaritySettings] = useState<RaritySettings>(() => {
@@ -177,6 +167,16 @@ function App() {
     loadConfig();
     loadAllAchievements(); // Load achievements on app start for the tab badge
 
+    // Load achievement duration from backend
+    invoke<number>('get_achievement_duration')
+      .then(duration => {
+        console.log('[App] Loaded duration from backend:', duration);
+        setAchievementSettings({ duration });
+      })
+      .catch(error => {
+        console.error('[App] Failed to load duration from backend:', error);
+      });
+
     // Listen for game not found events
     const unsubscribeNotFound = listen('game-not-found', (event: any) => {
       setMessage({
@@ -200,29 +200,32 @@ function App() {
     };
   }, []);
 
-  // Save achievement settings to localStorage whenever they change
+  // Save achievement duration to backend whenever it changes
   useEffect(() => {
-    localStorage.setItem('achievementSettings', JSON.stringify(achievementSettings));
-
-    // Emit event to overlay window so it can update its settings
-    window.dispatchEvent(new CustomEvent('achievement-settings-updated', {
-      detail: achievementSettings
-    }));
+    // Call backend to set duration
+    invoke('set_achievement_duration', { duration: achievementSettings.duration })
+      .then(() => {
+        console.log('[App] Duration saved to backend:', achievementSettings.duration);
+      })
+      .catch(error => {
+        console.error('[App] Failed to save duration to backend:', error);
+      });
   }, [achievementSettings]);
 
   // Save rarity settings to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('raritySettings', JSON.stringify(raritySettings));
+  }, [raritySettings]);
 
-    // Emit Tauri event to ALL windows (including overlay)
-    emit('rarity-settings-sync', raritySettings).catch((error) => {
-      console.error('Failed to emit rarity settings:', error);
+  // Sync rarity settings to overlay whenever they change
+  useEffect(() => {
+    // Send rarity settings to overlay via backend (reaches ALL windows)
+    invoke('sync_settings_to_overlay', {
+      achievementSettings: {}, // Not used anymore - overlay gets duration from backend
+      raritySettings
+    }).catch((error) => {
+      console.error('Failed to sync rarity settings to overlay:', error);
     });
-
-    // Also emit local event for same-window components
-    window.dispatchEvent(new CustomEvent('rarity-settings-updated', {
-      detail: raritySettings
-    }));
   }, [raritySettings]);
 
   // Debounced search effect
@@ -1565,6 +1568,11 @@ function App() {
                             {achievement.description && (
                               <p className="text-sm text-gray-400 mt-1">{achievement.description}</p>
                             )}
+                            {achievement.global_unlock_percentage !== null && achievement.global_unlock_percentage !== undefined && (
+                              <p className="text-xs text-blue-400 mt-2">
+                                Global unlock rate: {achievement.global_unlock_percentage.toFixed(1)}%
+                              </p>
+                            )}
                             {achievement.unlock_time && (
                               <p className="text-xs text-gray-500 mt-2">
                                 Unlocked: {new Date(achievement.unlock_time * 1000).toLocaleString()}
@@ -1693,11 +1701,11 @@ function App() {
                       <p className="font-semibold text-blue-300 text-base mb-2">Rarity System</p>
                       <p>Achievements are categorized by their global unlock percentage:</p>
                       <ul className="list-disc list-inside mt-2 space-y-1">
-                        <li><span className="font-semibold text-gray-300">Common:</span> 90%+ of players have unlocked</li>
-                        <li><span className="font-semibold text-green-400">Uncommon:</span> 60-89% unlock rate</li>
-                        <li><span className="font-semibold text-blue-400">Rare:</span> 35-59% unlock rate</li>
-                        <li><span className="font-semibold text-purple-400">Ultra Rare:</span> 15-34% unlock rate</li>
-                        <li><span className="font-semibold text-amber-400">Legendary:</span> 0-14% unlock rate</li>
+                        <li><span className="font-semibold text-gray-300">Common:</span> 30%+ of players have unlocked</li>
+                        <li><span className="font-semibold text-green-400">Uncommon:</span> 20-29% unlock rate</li>
+                        <li><span className="font-semibold text-blue-400">Rare:</span> 13-19% unlock rate</li>
+                        <li><span className="font-semibold text-purple-400">Ultra Rare:</span> 5-12% unlock rate</li>
+                        <li><span className="font-semibold text-amber-400">Legendary:</span> 0-4% unlock rate</li>
                       </ul>
                     </div>
                   </div>

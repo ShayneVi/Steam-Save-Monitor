@@ -57,11 +57,11 @@ export function RarityCustomizer({ rarity, settings, onChange, onTest }: RarityC
               {rarity}
             </h3>
             <p className="text-sm text-gray-400">
-              {rarity === 'Common' && '90%+ unlock rate'}
-              {rarity === 'Uncommon' && '60-89% unlock rate'}
-              {rarity === 'Rare' && '35-59% unlock rate'}
-              {rarity === 'Ultra Rare' && '15-34% unlock rate'}
-              {rarity === 'Legendary' && '0-14% unlock rate'}
+              {rarity === 'Common' && '30%+ unlock rate'}
+              {rarity === 'Uncommon' && '20-29% unlock rate'}
+              {rarity === 'Rare' && '13-19% unlock rate'}
+              {rarity === 'Ultra Rare' && '5-12% unlock rate'}
+              {rarity === 'Legendary' && '0-4% unlock rate'}
             </p>
           </div>
         </div>
