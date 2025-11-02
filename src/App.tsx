@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Save, FolderOpen, CheckCircle, AlertCircle, Info, GamepadIcon, Search, Trash2, X, Trophy, Download, RefreshCw, Plus } from 'lucide-react';
+import { Settings, Save, FolderOpen, CheckCircle, AlertCircle, Info, GamepadIcon, Search, Trash2, X, Trophy, Download, RefreshCw, Plus, Ban } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen, emit } from '@tauri-apps/api/event';
 import { AchievementToastContainer } from './components/AchievementToast';
 import { RarityCustomizer } from './components/RarityCustomizer';
 import { RaritySettings, defaultRaritySettings, RarityTier } from './types/rarityTypes';
 
-type Tab = 'settings' | 'games' | 'achievements' | 'customization';
+type Tab = 'settings' | 'games' | 'achievements' | 'exclusions' | 'customization';
 
 interface Config {
   ludusaviPath: string;
@@ -59,6 +59,13 @@ interface SourceOption {
 
 interface AchievementSettings {
   duration: number; // in seconds
+}
+
+interface Exclusion {
+  id?: number;
+  app_id: number;
+  name: string;
+  added_at: number;
 }
 
 function App() {
@@ -128,6 +135,14 @@ function App() {
     return defaultRaritySettings;
   });
 
+  // Exclusions state
+  const [exclusions, setExclusions] = useState<Exclusion[]>([]);
+  const [loadingExclusions, setLoadingExclusions] = useState(false);
+  const [exclusionSearchQuery, setExclusionSearchQuery] = useState('');
+  const [exclusionSearchResults, setExclusionSearchResults] = useState<SteamGameSearchResult[]>([]);
+  const [searchingExclusions, setSearchingExclusions] = useState(false);
+  const exclusionSearchTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const groupGamesByLetter = (games: string[]) => {
     const groups: { [key: string]: string[] } = {};
     
@@ -161,6 +176,84 @@ function App() {
       newExpanded.add(section);
     }
     setExpandedSections(newExpanded);
+  };
+
+  // Exclusions functions
+  const loadExclusions = async () => {
+    setLoadingExclusions(true);
+    try {
+      const result = await invoke<Exclusion[]>('get_all_exclusions');
+      setExclusions(result);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to load exclusions: ${error}`
+      });
+    } finally {
+      setLoadingExclusions(false);
+    }
+  };
+
+  const handleAddExclusion = async (appId: number, name: string) => {
+    try {
+      await invoke('add_exclusion', { appId, name });
+      setMessage({
+        type: 'success',
+        text: `Added ${name} to exclusions`
+      });
+      loadExclusions();
+      setExclusionSearchQuery('');
+      setExclusionSearchResults([]);
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to add exclusion: ${error}`
+      });
+    }
+  };
+
+  const handleRemoveExclusion = async (appId: number, name: string) => {
+    try {
+      await invoke('remove_exclusion', { appId });
+      setMessage({
+        type: 'success',
+        text: `Removed ${name} from exclusions`
+      });
+      loadExclusions();
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Failed to remove exclusion: ${error}`
+      });
+    }
+  };
+
+  const handleExclusionSearch = async (query: string) => {
+    setExclusionSearchQuery(query);
+
+    if (exclusionSearchTimerRef.current) {
+      clearTimeout(exclusionSearchTimerRef.current);
+    }
+
+    if (query.trim().length < 2) {
+      setExclusionSearchResults([]);
+      return;
+    }
+
+    exclusionSearchTimerRef.current = setTimeout(async () => {
+      setSearchingExclusions(true);
+      try {
+        const results = await invoke<SteamGameSearchResult[]>('search_steam_games', { query });
+        setExclusionSearchResults(results);
+      } catch (error) {
+        setMessage({
+          type: 'error',
+          text: `Failed to search Steam games: ${error}`
+        });
+      } finally {
+        setSearchingExclusions(false);
+      }
+    }, 500);
   };
 
   useEffect(() => {
@@ -931,6 +1024,30 @@ function App() {
             </button>
             <button
               onClick={() => {
+                setActiveTab('exclusions');
+                if (exclusions.length === 0) {
+                  loadExclusions();
+                }
+              }}
+              className={`px-6 py-4 font-semibold transition-all relative ${
+                activeTab === 'exclusions'
+                  ? 'text-blue-400 bg-[#1a1f3a]'
+                  : 'text-gray-400 hover:text-gray-200 hover:bg-[#13172a]'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Ban className="w-5 h-5" />
+                <span>Exclusions</span>
+                <span className="ml-1 px-2 py-0.5 bg-red-600/30 text-red-300 text-xs rounded-full border border-red-500/30">
+                  {exclusions.length}
+                </span>
+              </div>
+              {activeTab === 'exclusions' && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-t" />
+              )}
+            </button>
+            <button
+              onClick={() => {
                 setActiveTab('achievements');
                 if (achievementGames.length === 0) {
                   loadAllAchievements();
@@ -1586,6 +1703,127 @@ function App() {
                       </div>
                     ))
                   )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Exclusions Tab */}
+        {activeTab === 'exclusions' && (
+          <div className="space-y-6">
+            {/* Top Row: Add Exclusion Search */}
+            <div className="bg-[#1a1f3a] rounded-xl p-5 border border-[#2a3142] shadow-xl">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 bg-red-600/20 rounded-lg border border-red-500/30">
+                  <Ban className="w-5 h-5 text-red-400" />
+                </div>
+                <h3 className="text-lg font-bold text-white">Add App/Game to Exclusions</h3>
+              </div>
+              <p className="text-sm text-gray-400 mb-4">
+                Excluded apps will not be detected or monitored for achievements. Perfect for utility apps like Wallpaper Engine, Borderless Gaming, etc.
+              </p>
+
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={exclusionSearchQuery}
+                  onChange={(e) => handleExclusionSearch(e.target.value)}
+                  placeholder="Search Steam apps and games..."
+                  className="w-full bg-[#0f1420] border-2 border-[#2a3142] rounded-lg pl-10 pr-3 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                />
+                {searchingExclusions && (
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-700 border-t-blue-500"></div>
+                  </div>
+                )}
+              </div>
+
+              {/* Search Results */}
+              {exclusionSearchResults.length > 0 && (
+                <div className="mt-3 bg-[#0f1420] rounded-lg border border-[#2a3142] max-h-60 overflow-y-auto">
+                  <div className="divide-y divide-[#2a3142]">
+                    {exclusionSearchResults.map((app) => {
+                      const isAlreadyExcluded = exclusions.some(e => e.app_id === app.app_id);
+                      return (
+                        <button
+                          key={app.app_id}
+                          onClick={() => !isAlreadyExcluded && handleAddExclusion(app.app_id, app.name)}
+                          disabled={isAlreadyExcluded}
+                          className={`w-full p-3 transition-colors flex items-center justify-between group text-left ${
+                            isAlreadyExcluded
+                              ? 'opacity-50 cursor-not-allowed'
+                              : 'hover:bg-[#13172a] cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-medium text-sm truncate ${
+                              isAlreadyExcluded
+                                ? 'text-gray-500'
+                                : 'text-white group-hover:text-red-400 transition-colors'
+                            }`}>
+                              {app.name}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">AppID: {app.app_id}</p>
+                          </div>
+                          {isAlreadyExcluded ? (
+                            <CheckCircle className="w-4 h-4 text-gray-500 flex-shrink-0 ml-2" />
+                          ) : (
+                            <Ban className="w-4 h-4 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Excluded Apps List */}
+            {loadingExclusions ? (
+              <div className="bg-[#1a1f3a] rounded-xl p-12 border border-[#2a3142] shadow-xl text-center">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-700 border-t-blue-500 mb-4"></div>
+                <p className="text-gray-400 font-medium">Loading exclusions...</p>
+              </div>
+            ) : exclusions.length === 0 ? (
+              <div className="bg-[#1a1f3a] rounded-xl p-12 border border-[#2a3142] shadow-xl text-center">
+                <Ban className="w-16 h-16 mx-auto mb-4 opacity-50 text-gray-600" />
+                <p className="text-gray-400 font-medium mb-4">No exclusions added yet</p>
+                <p className="text-sm text-gray-500">Search for a Steam app above to exclude it from monitoring</p>
+              </div>
+            ) : (
+              <div className="bg-[#1a1f3a] rounded-xl p-5 border border-[#2a3142] shadow-xl">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="p-1.5 bg-red-600/20 rounded-lg border border-red-500/30">
+                    <Ban className="w-5 h-5 text-red-400" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Excluded Apps ({exclusions.length})</h3>
+                </div>
+                <div className="space-y-2">
+                  {exclusions.map((exclusion) => (
+                    <div
+                      key={exclusion.app_id}
+                      className="bg-[#0f1420] rounded-lg p-4 border border-[#2a3142] hover:border-red-500/30 transition-all group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-white text-sm truncate">
+                            {exclusion.name}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">AppID: {exclusion.app_id}</p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveExclusion(exclusion.app_id, exclusion.name)}
+                          className="ml-4 p-2 bg-red-600/20 hover:bg-red-600/30 rounded-lg border border-red-500/30 hover:border-red-500/50 transition-all group-hover:scale-105"
+                          title="Remove from exclusions"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-400" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
