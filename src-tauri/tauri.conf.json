@@ -2,7 +2,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:5173",
+    "devPath": "http://localhost:5175",
     "distDir": "../dist"
   },
   "package": {
@@ -14,7 +14,10 @@
       "all": false,
       "dialog": {
         "all": false,
-        "open": true
+        "open": true,
+        "confirm": true,
+        "message": true,
+        "ask": true
       },
       "notification": {
         "all": true

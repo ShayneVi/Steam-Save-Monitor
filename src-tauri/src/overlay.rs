@@ -3,7 +3,8 @@ use windows::Win32::Foundation::{RECT, HWND};
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowW, GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, GetWindowLongW,
     SetWindowLongW, GWL_STYLE, GWL_EXSTYLE, WS_POPUP, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WINDOW_EX_STYLE, HWND_TOPMOST, SetWindowPos, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
+    WS_EX_TRANSPARENT, WS_EX_LAYERED, WINDOW_EX_STYLE, HWND_TOPMOST, SetWindowPos,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
 };
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
@@ -96,14 +97,20 @@ impl OverlayManager {
         }
     }
 
-    /// Set window extended style to prevent activation/focus stealing
+    /// Set window extended style to prevent activation/focus stealing and make click-through
     fn set_no_activate(hwnd: HWND) -> Result<(), String> {
         unsafe {
             // Get current extended style
             let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
 
-            // Add WS_EX_NOACTIVATE and WS_EX_TOOLWINDOW flags
-            let new_ex_style = ex_style | (WS_EX_NOACTIVATE.0 as i32) | (WS_EX_TOOLWINDOW.0 as i32);
+            // Add WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_LAYERED, and WS_EX_TRANSPARENT flags
+            // WS_EX_TRANSPARENT makes the window click-through (mouse events pass through to windows below)
+            // WS_EX_LAYERED is required for WS_EX_TRANSPARENT to work properly
+            let new_ex_style = ex_style
+                | (WS_EX_NOACTIVATE.0 as i32)
+                | (WS_EX_TOOLWINDOW.0 as i32)
+                | (WS_EX_LAYERED.0 as i32)
+                | (WS_EX_TRANSPARENT.0 as i32);
 
             // Set new extended style
             SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style);

@@ -31,8 +31,13 @@ impl ProcessMonitor {
     
     pub async fn check_processes(&mut self) -> Option<GameEvent> {
         self.system.refresh_processes();
-        
+
         let mut running_games = HashSet::new();
+
+        // Debug: print currently tracked games
+        if !self.current_games.is_empty() {
+            println!("[ProcessMonitor] Currently tracking: {:?}", self.current_games);
+        }
         
         // Check each configured game
         for (game_name, exe_path) in &self.game_executables {
@@ -79,7 +84,7 @@ impl ProcessMonitor {
         // Check for games that have ended
         for game_name in self.current_games.clone() {
             if !running_games.contains(&game_name) {
-                println!("Game ended: {}", game_name);
+                println!("[ProcessMonitor] Game ended: {}", game_name);
                 let exe_path = self.game_executables.get(&game_name)
                     .cloned()
                     .unwrap_or_default();

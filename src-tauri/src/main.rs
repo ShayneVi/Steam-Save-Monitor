@@ -40,6 +40,7 @@ struct AppState {
     achievement_watcher: Arc<Mutex<Option<Arc<AchievementWatcher>>>>,
     overlay_manager: Arc<Mutex<OverlayManager>>,
     achievement_duration: Arc<Mutex<u32>>, // Duration in seconds
+    current_game: Arc<Mutex<Option<(String, u32)>>>, // (game_name, app_id)
 }
 
 enum MonitorCommand {
@@ -1030,15 +1031,76 @@ async fn test_overlay(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_achievement_duration(state: State<'_, AppState>) -> Result<u32, String> {
-    let duration = *state.achievement_duration.lock().unwrap();
-    Ok(duration)
+    let config = state.config.lock().unwrap();
+    Ok(config.get_all().achievement_duration)
 }
 
 #[tauri::command]
 async fn set_achievement_duration(duration: u32, state: State<'_, AppState>) -> Result<(), String> {
+    // Update in-memory duration for notification manager
     *state.achievement_duration.lock().unwrap() = duration;
-    println!("[Backend] Achievement duration set to {} seconds", duration);
+
+    // Save to config file
+    let mut config = state.config.lock().unwrap();
+    let mut cfg = config.get_all();
+    cfg.achievement_duration = duration;
+    config.set_all(cfg);
+
+    println!("[Backend] Achievement duration set to {} seconds and saved to config", duration);
     Ok(())
+}
+
+#[tauri::command]
+async fn reset_game_monitoring(state: State<'_, AppState>, window: Window) -> Result<(), String> {
+    println!("Resetting game monitoring...");
+
+    // Get current game info before stopping
+    let current_game = {
+        let game = state.current_game.lock().unwrap();
+        game.clone()
+    };
+
+    // Stop all monitors
+    stop_monitors(&state).await;
+
+    // Small delay to ensure clean stop
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Restart monitors
+    start_monitors(&state, window).await;
+
+    if let Some((game_name, _)) = current_game {
+        println!("Game monitoring reset for: {}", game_name);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_game_monitoring(state: State<'_, AppState>) -> Result<(), String> {
+    let game_info = {
+        let mut current_game = state.current_game.lock().unwrap();
+        current_game.take()
+    };
+
+    if let Some((game_name, app_id)) = game_info {
+        println!("Stopping monitoring for: {} (AppID: {})", game_name, app_id);
+
+        // Stop watching this specific game
+        if let Some(watcher) = state.achievement_watcher.lock().unwrap().as_ref() {
+            watcher.stop_watching_game(app_id);
+        }
+
+        Ok(())
+    } else {
+        Err("No game is currently being monitored".to_string())
+    }
+}
+
+#[tauri::command]
+async fn get_current_game(state: State<'_, AppState>) -> Result<Option<(String, u32)>, String> {
+    let game = state.current_game.lock().unwrap();
+    Ok(game.clone())
 }
 
 #[tauri::command]
@@ -1120,29 +1182,215 @@ fn parse_appmanifest_basic(manifest_path: &PathBuf) -> Option<(u32, String)> {
     }
 }
 
+// Helper function to export achievements for a game
+async fn export_achievements_internal(
+    app_id: u32,
+    game_name: &str,
+    state: &AppState,
+) -> Result<usize, String> {
+    use std::fs;
+    use std::io::Write;
+
+    // Get database
+    let db = {
+        let path_guard = state.achievement_db_path.lock().unwrap();
+        match &*path_guard {
+            Some(path) => AchievementDatabase::new(path.clone()).ok(),
+            None => None,
+        }
+    };
+
+    let db = match db {
+        Some(db) => db,
+        None => return Err("Achievement database not initialized".to_string()),
+    };
+
+    // Get all achievements for this game
+    let all_achievements = db.get_game_achievements(app_id)?;
+
+    // Filter only unlocked achievements
+    let unlocked: Vec<_> = all_achievements.iter()
+        .filter(|a| a.achieved)
+        .collect();
+
+    let unlocked_count = unlocked.len();
+
+    if unlocked_count == 0 {
+        return Ok(0); // No achievements to export
+    }
+
+    // Convert to Steam API format
+    let mut steam_format = serde_json::Map::new();
+    for achievement in unlocked {
+        let mut achievement_data = serde_json::Map::new();
+        achievement_data.insert(
+            "UnlockTime".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from(achievement.unlock_time.unwrap_or(0))
+            )
+        );
+        steam_format.insert(
+            achievement.achievement_id.clone(),
+            serde_json::Value::Object(achievement_data)
+        );
+    }
+
+    let json_string = serde_json::to_string_pretty(&steam_format)
+        .map_err(|e| format!("Failed to serialize to JSON: {}", e))?;
+
+    // Get Documents folder
+    let documents_dir = match dirs::document_dir() {
+        Some(dir) => dir,
+        None => return Err("Could not find Documents folder".to_string()),
+    };
+
+    // Create Steam Backup Monitor folder
+    let export_dir = documents_dir.join("Steam Backup Monitor");
+    if !export_dir.exists() {
+        fs::create_dir_all(&export_dir)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    // Sanitize game name for filename
+    let safe_game_name: String = game_name.chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c
+        })
+        .collect();
+
+    // Create file path
+    let file_path = export_dir.join(format!("{}.json", safe_game_name));
+
+    // Write to file (overwrites if exists)
+    let mut file = fs::File::create(&file_path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+
+    file.write_all(json_string.as_bytes())
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    println!("Exported {} achievements for {}", unlocked_count, game_name);
+    Ok(unlocked_count)
+}
+
+// Helper function to save backup date
+fn save_backup_date(game_name: &str) -> Result<(), String> {
+    use std::fs;
+    use std::io::Write;
+
+    // Get Documents folder
+    let documents_dir = match dirs::document_dir() {
+        Some(dir) => dir,
+        None => return Err("Could not find Documents folder".to_string()),
+    };
+
+    // Create "Steam Save Monitor Backup dates" folder
+    let backup_dates_dir = documents_dir.join("Steam Save Monitor Backup dates");
+    if !backup_dates_dir.exists() {
+        fs::create_dir_all(&backup_dates_dir)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    // Sanitize game name for filename
+    let safe_game_name: String = game_name.chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c
+        })
+        .collect();
+
+    // Create file path
+    let file_path = backup_dates_dir.join(format!("{}.json", safe_game_name));
+
+    // Get current date and time
+    let now = chrono::Local::now();
+    let date_time_str = now.format("%Y-%m-%d %H:%M:%S").to_string();
+
+    // Create JSON with single date (replaces existing)
+    let backup_data = serde_json::json!({
+        "date": date_time_str
+    });
+
+    // Serialize to JSON
+    let json_string = serde_json::to_string_pretty(&backup_data)
+        .map_err(|e| format!("Failed to serialize to JSON: {}", e))?;
+
+    // Write to file (overwrites if exists)
+    let mut file = fs::File::create(&file_path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+
+    file.write_all(json_string.as_bytes())
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    println!("Saved backup date for {}", game_name);
+    Ok(())
+}
+
 async fn handle_game_backup(
     game_name: String,
+    app_id: Option<u32>,
     state: &AppState,
     app_handle: tauri::AppHandle,
 ) {
     println!("Backing up: {}", game_name);
-    
+
     let (ludusavi_path, backup_path, notifications_enabled) = {
         let config = state.config.lock().unwrap();
         let cfg = config.get_all();
         (cfg.ludusavi_path, cfg.backup_path, cfg.notifications_enabled)
     };
-    
+
     let manager = LudusaviManager::new(ludusavi_path, backup_path);
-    
+
     match manager.backup(&game_name).await {
         Ok(result) => {
             if result.success {
+                let files_backed_up = result.files_backed_up.unwrap_or(0);
+                let total_size = result.total_size.unwrap_or_default();
+
+                // Try to find app_id if not provided - look up in database by game name
+                let resolved_app_id = if app_id.is_some() {
+                    app_id
+                } else {
+                    // Try to find the game in the achievement database
+                    let db = {
+                        let path_guard = state.achievement_db_path.lock().unwrap();
+                        match &*path_guard {
+                            Some(path) => AchievementDatabase::new(path.clone()).ok(),
+                            None => None,
+                        }
+                    };
+
+                    if let Some(db) = db {
+                        // Get all games and find by name
+                        if let Ok(games) = db.get_all_games() {
+                            games.iter()
+                                .find(|g| g.game_name == game_name)
+                                .map(|g| g.app_id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+
+                // Export achievements if we have an app_id
+                let achievements_count = if let Some(id) = resolved_app_id {
+                    export_achievements_internal(id, &game_name, state).await.unwrap_or(0)
+                } else {
+                    0
+                };
+
+                // Save backup date
+                let _ = save_backup_date(&game_name);
+
                 if notifications_enabled {
-                    state.notification_manager.lock().unwrap().show_backup_success(
+                    state.notification_manager.lock().unwrap().show_backup_success_with_achievements(
                         &game_name,
-                        result.files_backed_up.unwrap_or(0),
-                        &result.total_size.unwrap_or_default(),
+                        files_backed_up,
+                        &total_size,
+                        achievements_count,
                     );
                 }
             } else if result.not_found.unwrap_or(false) {
@@ -1238,15 +1486,40 @@ async fn start_monitors(state: &AppState, window: Window) {
                                         steam_monitor::GameEvent::Ended(game) => {
                                             println!("Steam game ended: {}", game.name);
 
+                                            // Clear current game
+                                            {
+                                                let mut current_game = state_clone.current_game.lock().unwrap();
+                                                *current_game = None;
+                                            }
+
+                                            // Update tray menu asynchronously without blocking
+                                            let app_for_tray = app_clone.clone();
+                                            tauri::async_runtime::spawn(async move {
+                                                update_tray_menu(&app_for_tray, None);
+                                            });
+
                                             // Stop watching achievements for this game
                                             if let Some(ref watcher) = *state_clone.achievement_watcher.lock().unwrap() {
                                                 watcher.stop_watching_game(game.app_id);
                                             }
 
-                                            handle_game_backup(game.name, &state_clone, app_clone.clone()).await;
+                                            handle_game_backup(game.name, Some(game.app_id), &state_clone, app_clone.clone()).await;
                                         }
                                         steam_monitor::GameEvent::Started(game) => {
                                             println!("Steam game started: {}", game.name);
+
+                                            // Update current game
+                                            {
+                                                let mut current_game = state_clone.current_game.lock().unwrap();
+                                                *current_game = Some((game.name.clone(), game.app_id));
+                                            }
+
+                                            // Update tray menu asynchronously without blocking
+                                            let app_for_tray = app_clone.clone();
+                                            let game_name_for_tray = game.name.clone();
+                                            tauri::async_runtime::spawn(async move {
+                                                update_tray_menu(&app_for_tray, Some(game_name_for_tray));
+                                            });
 
                                             // Start watching achievements for this game
                                             if let Some(ref watcher) = *state_clone.achievement_watcher.lock().unwrap() {
@@ -1298,48 +1571,129 @@ async fn start_monitors(state: &AppState, window: Window) {
             
             tokio::select! {
                 _ = async {
+                    let mut check_count = 0;
                     loop {
+                        check_count += 1;
+                        if check_count % 20 == 0 {
+                            println!("[ProcessMonitor] Loop running, check #{}", check_count);
+                        }
                         if let Some(event) = monitor.check_processes().await {
                             match event {
                                 process_monitor::GameEvent::Started(game) => {
                                     println!("Process-monitored game detected: {}", game.name);
-                                    
+
+                                    // Update current game (use 0 for non-Steam games)
+                                    {
+                                        let mut current_game = state_clone.current_game.lock().unwrap();
+                                        *current_game = Some((game.name.clone(), 0));
+                                    }
+
+                                    // Update tray menu asynchronously without blocking
+                                    let app_for_tray = app_clone.clone();
+                                    let game_name_for_tray = game.name.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        update_tray_menu(&app_for_tray, Some(game_name_for_tray));
+                                    });
+
+                                    // Start watching achievements for this game (lookup app_id from database)
+                                    let game_name_for_watcher = game.name.clone();
+                                    if let Some(ref watcher) = *state_clone.achievement_watcher.lock().unwrap() {
+                                        let watcher = Arc::clone(watcher);
+
+                                        // Try to find app_id from database
+                                        let db = {
+                                            let path_guard = state_clone.achievement_db_path.lock().unwrap();
+                                            match &*path_guard {
+                                                Some(path) => AchievementDatabase::new(path.clone()).ok(),
+                                                None => None,
+                                            }
+                                        };
+
+                                        if let Some(db) = db {
+                                            if let Ok(games) = db.get_all_games() {
+                                                if let Some(game_info) = games.iter().find(|g| g.game_name == game_name_for_watcher) {
+                                                    let app_id = game_info.app_id;
+                                                    tokio::spawn(async move {
+                                                        watcher.start_watching_game(app_id, game_name_for_watcher).await;
+                                                    });
+                                                    println!("Started watching achievements for {} (AppID: {})", game.name, app_id);
+                                                } else {
+                                                    println!("Game {} not found in achievement database", game.name);
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     // Pause Steam monitoring
                                     let steam_tx_opt = {
                                         let guard = state_clone.steam_handle.lock().unwrap();
                                         guard.clone()
                                     };
-                                    
+
                                     if let Some(steam_tx) = steam_tx_opt {
                                         let _ = steam_tx.send(MonitorCommand::Pause).await;
                                         println!("Paused Steam monitoring while {} is running", game.name);
                                     }
-                                    
+
                                     if notifications {
                                         state_clone.notification_manager.lock().unwrap().show_game_detected(&game.name);
                                     }
-                                    
+
                                     let _ = app_clone.emit_all("game-detected", &game.name);
                                 }
                                 process_monitor::GameEvent::Ended(game) => {
                                     println!("Process-monitored game ended: {}", game.name);
-                                    
+
+                                    // Clear current game
+                                    {
+                                        let mut current_game = state_clone.current_game.lock().unwrap();
+                                        *current_game = None;
+                                    }
+
+                                    // Update tray menu asynchronously without blocking
+                                    let app_for_tray = app_clone.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        update_tray_menu(&app_for_tray, None);
+                                    });
+
+                                    // Stop watching achievements for this game (lookup app_id from database)
+                                    let game_name_for_stop = game.name.clone();
+                                    if let Some(ref watcher) = *state_clone.achievement_watcher.lock().unwrap() {
+                                        // Try to find app_id from database
+                                        let db = {
+                                            let path_guard = state_clone.achievement_db_path.lock().unwrap();
+                                            match &*path_guard {
+                                                Some(path) => AchievementDatabase::new(path.clone()).ok(),
+                                                None => None,
+                                            }
+                                        };
+
+                                        if let Some(db) = db {
+                                            if let Ok(games) = db.get_all_games() {
+                                                if let Some(game_info) = games.iter().find(|g| g.game_name == game_name_for_stop) {
+                                                    watcher.stop_watching_game(game_info.app_id);
+                                                    println!("Stopped watching achievements for {} (AppID: {})", game.name, game_info.app_id);
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     // Resume Steam monitoring
                                     let steam_tx_opt = {
                                         let guard = state_clone.steam_handle.lock().unwrap();
                                         guard.clone()
                                     };
-                                    
+
                                     if let Some(steam_tx) = steam_tx_opt {
                                         let _ = steam_tx.send(MonitorCommand::Resume).await;
                                         println!("Resumed Steam monitoring");
                                     }
-                                    
+
                                     if notifications {
                                         state_clone.notification_manager.lock().unwrap().show_game_ended(&game.name);
                                     }
-                                    
-                                    handle_game_backup(game.name, &state_clone, app_clone.clone()).await;
+
+                                    handle_game_backup(game.name, None, &state_clone, app_clone.clone()).await;
                                 }
                             }
                         }
@@ -1393,8 +1747,43 @@ fn create_tray() -> SystemTray {
         .add_item(open)
         .add_native_item(tauri::SystemTrayMenuItem::Separator)
         .add_item(quit);
-    
+
     SystemTray::new().with_menu(tray_menu)
+}
+
+fn update_tray_menu(app: &tauri::AppHandle, game_name: Option<String>) {
+    use tauri::SystemTraySubmenu;
+
+    let open = CustomMenuItem::new("open".to_string(), "Open Settings");
+    let quit = CustomMenuItem::new("quit".to_string(), "Quit");
+
+    let mut tray_menu = SystemTrayMenu::new();
+
+    // If a game is being monitored, add it to the menu
+    if let Some(name) = game_name {
+        let game_item = CustomMenuItem::new("game".to_string(), format!("Monitoring: {}", name)).disabled();
+        let reset_monitoring = CustomMenuItem::new("reset_monitoring".to_string(), "Reset Monitoring");
+        let stop_monitoring = CustomMenuItem::new("stop_monitoring".to_string(), format!("Stop Monitoring {}", name));
+
+        let game_submenu = SystemTraySubmenu::new(
+            format!("📊 {}", name),
+            SystemTrayMenu::new()
+                .add_item(reset_monitoring)
+                .add_item(stop_monitoring)
+        );
+
+        tray_menu = tray_menu
+            .add_submenu(game_submenu)
+            .add_native_item(tauri::SystemTrayMenuItem::Separator);
+    }
+
+    tray_menu = tray_menu
+        .add_item(open)
+        .add_native_item(tauri::SystemTrayMenuItem::Separator)
+        .add_item(quit);
+
+    let tray_handle = app.tray_handle();
+    let _ = tray_handle.set_menu(tray_menu);
 }
 
 fn main() {
@@ -1445,8 +1834,9 @@ fn main() {
             // This prevents race conditions where frontend tries to access state before it's ready
             let config = Arc::new(Mutex::new(ConfigManager::new()));
 
-            // Create state with MINIMAL initialization - don't initialize anything yet!
-            let achievement_duration = Arc::new(Mutex::new(6)); // Default 6 seconds
+            // Load achievement duration from config
+            let duration_from_config = config.lock().unwrap().get_all().achievement_duration;
+            let achievement_duration = Arc::new(Mutex::new(duration_from_config));
 
             let state = AppState {
                 config: config.clone(),
@@ -1457,6 +1847,7 @@ fn main() {
                 achievement_watcher: Arc::new(Mutex::new(None)),
                 overlay_manager: Arc::new(Mutex::new(OverlayManager::new())),
                 achievement_duration,
+                current_game: Arc::new(Mutex::new(None)),
             };
 
             // Register state FIRST - before doing ANYTHING else
@@ -1475,6 +1866,13 @@ fn main() {
             .center()
             .build()
             .map_err(|e| format!("Failed to create main window: {}", e))?;
+
+            // Open devtools in development mode
+            #[cfg(debug_assertions)]
+            {
+                main_window.open_devtools();
+                println!("✓ DevTools opened");
+            }
             println!("✓ Main window created and shown");
 
             // Now it's safe to initialize components
@@ -1667,6 +2065,25 @@ fn main() {
                     window.show().unwrap();
                     window.set_focus().unwrap();
                 }
+                "reset_monitoring" => {
+                    let app_handle = app.clone();
+                    let window = app.get_window("main").unwrap();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(state) = app_handle.try_state::<AppState>() {
+                            let _ = reset_game_monitoring(state, window).await;
+                        }
+                    });
+                }
+                "stop_monitoring" => {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(state) = app_handle.try_state::<AppState>() {
+                            let _ = stop_game_monitoring(state).await;
+                            // Update tray menu to remove game
+                            update_tray_menu(&app_handle, None);
+                        }
+                    });
+                }
                 "quit" => {
                     std::process::exit(0);
                 }
@@ -1708,6 +2125,9 @@ fn main() {
             sync_settings_to_overlay,
             get_achievement_duration,
             set_achievement_duration,
+            reset_game_monitoring,
+            stop_game_monitoring,
+            get_current_game,
             play_windows_notification_sound,
             debug_log,
             read_audio_file,

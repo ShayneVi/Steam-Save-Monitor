@@ -334,6 +334,43 @@ impl AchievementScanner {
         Ok(count)
     }
 
+    /// Create Goldberg achievement file structure if it doesn't exist
+    pub async fn create_goldberg_achievements(&self, app_id: u32, steam_client: &SteamAchievementClient) -> Result<PathBuf, String> {
+        let appdata = std::env::var("APPDATA")
+            .map_err(|_| "Could not get APPDATA environment variable".to_string())?;
+
+        // Use GSE Saves as default path
+        let goldberg_dir = PathBuf::from(&appdata).join("GSE Saves").join(format!("{}", app_id));
+        let achievements_file = goldberg_dir.join("achievements.json");
+
+        // Create directory
+        fs::create_dir_all(&goldberg_dir)
+            .map_err(|e| format!("Failed to create Goldberg directories: {}", e))?;
+
+        // Get achievement schema from Steam
+        let steam_schema = steam_client.get_achievement_schema(app_id).await?;
+
+        // Create achievements.json using the actual achievement API names from Steam
+        let mut achievements_map = serde_json::Map::new();
+        for ach in steam_schema.iter() {
+            let mut ach_data = serde_json::Map::new();
+            ach_data.insert("earned".to_string(), serde_json::Value::Bool(false));
+            ach_data.insert("earned_time".to_string(), serde_json::Value::Number(0.into()));
+
+            // Use the actual API name from Steam (e.g., "NEW_ACHIEVEMENT_1_0", "ACH_FINISH_TUTORIAL_00", etc.)
+            achievements_map.insert(ach.name.clone(), serde_json::Value::Object(ach_data));
+        }
+
+        let json_content = serde_json::to_string_pretty(&achievements_map)
+            .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+
+        fs::write(&achievements_file, json_content)
+            .map_err(|e| format!("Failed to write achievements.json: {}", e))?;
+
+        println!("  ✓ Created Goldberg achievement file at: {:?}", achievements_file);
+        Ok(achievements_file)
+    }
+
     /// Scan Goldberg emulator achievements (GSE Saves format)
     pub async fn scan_goldberg_achievements(&self, app_id: u32, game_name: &str, db_path: PathBuf, steam_client: &SteamAchievementClient) -> Result<usize, String> {
         // GSE (Goldberg Steam Emulator) stores achievements in %APPDATA%/GSE Saves/%APPID%/achievements.json
@@ -354,8 +391,12 @@ impl AchievementScanner {
             }
         }
 
-        let Some(path) = goldberg_path else {
-            return Ok(0);
+        let path = if let Some(p) = goldberg_path {
+            p
+        } else {
+            // File doesn't exist, create it
+            println!("  Goldberg achievement file not found, creating...");
+            self.create_goldberg_achievements(app_id, steam_client).await?
         };
 
         println!("  Found Goldberg achievements at: {:?}", path);
@@ -507,6 +548,25 @@ impl AchievementScanner {
         }
     }
 
+    /// Create Online-fix achievement file structure if it doesn't exist
+    pub async fn create_onlinefix_achievements(&self, app_id: u32, _steam_client: &SteamAchievementClient) -> Result<PathBuf, String> {
+        let onlinefix_base = PathBuf::from(r"C:\Users\Public\Documents\OnlineFix")
+            .join(format!("{}", app_id));
+        let stats_dir = onlinefix_base.join("Stats");
+        let achievements_file = stats_dir.join("Achievements.ini");
+
+        // Create directories
+        fs::create_dir_all(&stats_dir)
+            .map_err(|e| format!("Failed to create Online-fix directories: {}", e))?;
+
+        // Create empty Achievements.ini (Online-fix populates it when achievements are unlocked)
+        fs::write(&achievements_file, "")
+            .map_err(|e| format!("Failed to write Achievements.ini: {}", e))?;
+
+        println!("  ✓ Created empty Online-fix achievement file at: {:?}", achievements_file);
+        Ok(achievements_file)
+    }
+
     /// Scan Online-fix emulator achievements
     pub async fn scan_onlinefix_achievements(&self, app_id: u32, game_name: &str, db_path: PathBuf, steam_client: &SteamAchievementClient) -> Result<usize, String> {
         // Online-fix stores achievements in C:\Users\Public\Documents\OnlineFix\[APPID]\Stats\Achievements.ini
@@ -523,7 +583,9 @@ impl AchievementScanner {
         } else if onlinefix_base.join("stats").join("achievements.ini").exists() {
             onlinefix_base.join("stats").join("achievements.ini")
         } else {
-            return Ok(0);
+            // File doesn't exist, create it
+            println!("  Online-fix achievement file not found, creating...");
+            self.create_onlinefix_achievements(app_id, steam_client).await?
         };
 
         println!("  Found Online-fix achievements at: {:?}", onlinefix_path);

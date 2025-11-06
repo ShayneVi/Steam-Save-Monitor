@@ -57,6 +57,15 @@ impl NotificationManager {
         self.show_notification("Game Save Monitor", &format!("{}\n{}", game_name, body));
     }
 
+    pub fn show_backup_success_with_achievements(&self, game_name: &str, files_backed_up: usize, total_size: &str, achievements_count: usize) {
+        let body = if achievements_count > 0 {
+            format!("✓ {} files backed up\nSize: {}\n🏆 {} achievements backed up", files_backed_up, total_size, achievements_count)
+        } else {
+            format!("✓ {} files backed up\nSize: {}", files_backed_up, total_size)
+        };
+        self.show_notification("Game Save Monitor", &format!("{}\n{}", game_name, body));
+    }
+
     pub fn show_game_detected(&self, game_name: &str) {
         self.show_notification("Game Save Monitor", &format!("{}\n▶ Game Detected - Monitoring saves & achievements...", game_name));
     }
