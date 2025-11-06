@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Save, FolderOpen, CheckCircle, AlertCircle, Info, GamepadIcon, Search, Trash2, X, Trophy, Download, RefreshCw, Plus, Ban } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen, emit } from '@tauri-apps/api/event';
+import { ask } from '@tauri-apps/api/dialog';
 import { AchievementToastContainer } from './components/AchievementToast';
 import { RarityCustomizer } from './components/RarityCustomizer';
 import { RaritySettings, defaultRaritySettings, RarityTier } from './types/rarityTypes';
@@ -121,6 +122,7 @@ function App() {
 
   // Achievement customization settings
   const [achievementSettings, setAchievementSettings] = useState<AchievementSettings>({ duration: 6 });
+  const achievementDurationLoadedRef = useRef(false);
 
   // Rarity settings
   const [raritySettings, setRaritySettings] = useState<RaritySettings>(() => {
@@ -259,15 +261,18 @@ function App() {
   useEffect(() => {
     loadConfig();
     loadAllAchievements(); // Load achievements on app start for the tab badge
+    loadExclusions(); // Load exclusions on app start for the tab badge
 
     // Load achievement duration from backend
     invoke<number>('get_achievement_duration')
       .then(duration => {
         console.log('[App] Loaded duration from backend:', duration);
         setAchievementSettings({ duration });
+        achievementDurationLoadedRef.current = true;
       })
       .catch(error => {
         console.error('[App] Failed to load duration from backend:', error);
+        achievementDurationLoadedRef.current = true; // Mark as loaded even on error
       });
 
     // Listen for game not found events
@@ -295,6 +300,11 @@ function App() {
 
   // Save achievement duration to backend whenever it changes
   useEffect(() => {
+    // Don't save until we've loaded the initial value from the backend
+    if (!achievementDurationLoadedRef.current) {
+      return;
+    }
+
     // Call backend to set duration
     invoke('set_achievement_duration', { duration: achievementSettings.duration })
       .then(() => {
@@ -750,12 +760,18 @@ function App() {
       });
 
       if (backupPath) {
-        // Ask user if they want to restore from backup
-        const restore = window.confirm(
+        console.log('[App] Backup found at:', backupPath);
+        console.log('[App] Showing confirmation dialog...');
+
+        // Ask user if they want to restore from backup using Tauri's dialog API
+        const restore = await ask(
           `A backup file was found for ${sourceSelectionGame.name}.\n\n` +
           `Would you like to restore achievements from the backup?\n\n` +
-          `The backup will be imported while still monitoring the selected source for new achievements.`
+          `The backup will be imported while still monitoring the selected source for new achievements.`,
+          { title: 'Steam Backup Manager', type: 'info' }
         );
+
+        console.log('[App] User chose restore:', restore);
 
         if (restore) {
           try {
@@ -1023,12 +1039,7 @@ function App() {
               )}
             </button>
             <button
-              onClick={() => {
-                setActiveTab('exclusions');
-                if (exclusions.length === 0) {
-                  loadExclusions();
-                }
-              }}
+              onClick={() => setActiveTab('exclusions')}
               className={`px-6 py-4 font-semibold transition-all relative ${
                 activeTab === 'exclusions'
                   ? 'text-blue-400 bg-[#1a1f3a]'

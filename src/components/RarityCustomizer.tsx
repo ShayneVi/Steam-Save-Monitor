@@ -51,7 +51,10 @@ export function RarityCustomizer({ rarity, settings, onChange, onTest }: RarityC
         className="w-full p-5 flex items-center justify-between hover:bg-[#13172a] transition-colors"
       >
         <div className="flex items-center gap-3">
-          <span className="text-3xl">{settings.icon}</span>
+          {/* Only show icon if it's an emoji (not a file path) */}
+          {settings.icon && !settings.icon.includes('\\') && !settings.icon.includes('/') && !/\.(png|jpg|jpeg|gif|bmp|svg|ico|webp)$/i.test(settings.icon) && (
+            <span className="text-3xl">{settings.icon}</span>
+          )}
           <div className="text-left">
             <h3 className="text-xl font-bold" style={{ color: getRarityColor() }}>
               {rarity}

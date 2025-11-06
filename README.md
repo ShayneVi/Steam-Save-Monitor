@@ -29,22 +29,27 @@ Steam Backup Manager is a powerful desktop application that combines automatic g
 
 - **💾 Intelligent Backup System**
   - Automatic game save backups using Ludusavi
+  - Automatic achievement export after every game session
   - Achievement backup and restore functionality
   - Export achievements in Steam API format
+  - Backup date tracking with timestamp logs
   - Backup versioning with timestamps
   - Configurable backup locations
 
 - **🎮 Real-Time Game Monitoring**
   - Steam API integration for game detection
-  - Process-based monitoring for non-Steam games
+  - Process-based monitoring for non-Steam games (custom executables)
   - Achievement unlock detection during gameplay
   - Automatic backup on game closure
+  - System tray controls with current game display
+  - Reset and stop monitoring options for stuck games
 
 - **🔔 Advanced Notification System**
   - Rarity-based achievement notifications
-  - In-game overlay with customizable appearance
+  - In-game overlay with click-through (doesn't block mouse input)
   - Windows native notifications
   - Achievement unlock animations
+  - Customizable notification duration (1-10 seconds)
   - Customizable notification sounds
 
 - **⚙️ Extensive Customization**
@@ -107,7 +112,10 @@ The application automatically detects and tracks achievements from:
 3. Click **Add** on the desired game
 4. The app automatically checks which sources have achievement data
 5. Select your preferred source
-6. If a backup exists, you'll be prompted to restore it
+6. **If source files don't exist**: The app automatically creates them
+   - Online-fix: Creates empty `Achievements.ini` in `C:\Users\Public\Documents\OnlineFix\[APPID]\Stats\`
+   - Goldberg: Creates `achievements.json` with all achievements in `%APPDATA%\GSE Saves\[APPID]\`
+7. If a backup exists, you'll be prompted to restore it
 
 ### Achievement Management
 
@@ -265,6 +273,36 @@ When adding a game:
 - Used for rarity calculation
 - Displayed in achievement lists
 - Powers notification customization
+
+### Using Goldberg Emulator with Global Online Fix
+
+For games that require online functionality while maintaining achievement tracking, you can use [SteamAutoCrack](https://github.com/SteamAutoCracks/Steam-auto-crack) to integrate Goldberg Emulator directly into your game files. This allows the use of Global Online Fix for multiplayer features while this application monitors and tracks achievements.
+
+**Setup Instructions:**
+
+1. **Browse Game Directory**
+   - Launch SteamAutoCrack
+   - Click "Browse" at the top and select your game's installation folder
+
+2. **Find Game AppID**
+   - Use the built-in "AppID Finder" to locate your game's Steam AppID
+
+3. **Configure API Generator**
+   - In "Generator API" section, select "Steam Web API"
+   - Enter your Steam Web API Key (obtained from [Steam Developer Portal](https://steamcommunity.com/dev/apikey))
+
+4. **Generate Achievement Files**
+   - Click "Steam Web App List" to fetch achievement data
+   - Click "Start" at the bottom to begin generation
+   - Wait for the log to display "Done"
+
+5. **Enable Achievement Tracking**
+   - In Steam Backup Manager, navigate to the Achievements tab
+   - Add your game and select "Goldberg" as the achievement source
+   - Launch your game normally
+   - Achievements will now be monitored, displayed, and backed up automatically
+
+This configuration enables seamless integration between Global Online Fix for online gameplay and Steam Backup Manager for achievement tracking and backup functionality.
 
 ---
 
