@@ -8,6 +8,8 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://www.microsoft.com/windows)
 [![Tauri](https://img.shields.io/badge/Built%20with-Tauri-24C8DB.svg)](https://tauri.app/)
 
+> **Note:** This repository is named "Steam-Save-Monitor" but the application is officially branded as "Steam Backup Manager"
+
 </div>
 
 ---
@@ -15,6 +17,8 @@
 ## 📋 Overview
 
 Steam Backup Manager is a powerful desktop application that combines automatic game save backups with comprehensive achievement tracking. It monitors your gaming sessions, tracks achievement unlocks across multiple sources, and creates intelligent backups of both your saves and achievements—all without manual intervention.
+
+The application monitors Steam games automatically by reading Steam's local configuration files (no Steam API key required for game detection). Achievement tracking and backup features work with multiple sources including Steam Web API, Goldberg Emulator, Online-fix, Steamtools, and GSE Saves.
 
 ### Core Features
 
@@ -67,9 +71,14 @@ Steam Backup Manager is a powerful desktop application that combines automatic g
 
 1. **Windows 10 or later**
 2. **[Ludusavi](https://github.com/mtkennerly/ludusavi/releases)** - Download and extract the latest release
-3. **Steam Account** (recommended for full functionality)
-   - [Steam Web API Key](https://steamcommunity.com/dev/apikey)
-   - Steam64 ID (found in your profile URL)
+3. **Steam Installation** (required for automatic game detection)
+   - The app monitors Steam games by reading Steam's local configuration files
+   - No Steam API key needed for basic game monitoring and save backups
+4. **Steam Web API Key** (optional, for enhanced achievement features)
+   - Required only for Steam Web API achievement source
+   - Enables global unlock percentages and achievement icons
+   - Get your key from [Steam Web API Key](https://steamcommunity.com/dev/apikey)
+   - You'll also need your Steam64 ID (found in your profile URL)
 
 ### Installation
 
@@ -81,13 +90,15 @@ Steam Backup Manager is a powerful desktop application that combines automatic g
 
 Navigate to the **Settings** tab and configure:
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| **Steam Web API Key** | Personal API key from Steam | `ABC123XYZ789...` |
-| **Steam User ID** | Steam account ID | `your_username` |
-| **Steam64 ID** | 64-bit Steam ID | `76561198012345678` |
-| **Ludusavi Path** | Path to ludusavi.exe | `C:\Tools\Ludusavi\ludusavi.exe` |
-| **Backup Directory** | Backup storage location | `C:\GameBackups` |
+| Field | Description | Required | Example |
+|-------|-------------|----------|---------|
+| **Ludusavi Path** | Path to ludusavi.exe | Yes | `C:\Tools\Ludusavi\ludusavi.exe` |
+| **Backup Directory** | Backup storage location | Yes | `C:\GameBackups` |
+| **Steam Web API Key** | Personal API key from Steam | Optional* | `ABC123XYZ789...` |
+| **Steam User ID** | Steam account ID | Optional* | `your_username` |
+| **Steam64 ID** | 64-bit Steam ID | Optional* | `76561198012345678` |
+
+*Required only for Steam Web API achievement source and global unlock percentages
 
 Click **Save Configuration** to persist your settings.
 

@@ -1,7 +1,7 @@
 [package]
 name = "steam-backup-manager"
 version = "1.0.0"
-description = "Automatic Steam game save backup with Ludusavi"
+description = "Comprehensive Steam game save backup and achievement tracking solution with intelligent monitoring, real-time achievement detection, and Ludusavi integration"
 authors = ["you"]
 edition = "2021"
 
